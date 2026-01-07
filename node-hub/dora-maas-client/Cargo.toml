@@ -1,0 +1,45 @@
+[package]
+name = "dora-maas-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+description = "Dora MaaS (Model-as-a-Service) client for LLM inference"
+license = "Apache-2.0"
+authors = ["Dora Contributors"]
+keywords = ["dora", "llm", "ai", "openai", "streaming"]
+categories = ["api-bindings", "web-programming", "asynchronous"]
+readme = "README.md"
+
+[workspace]
+
+[[bin]]
+name = "dora-maas-client"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1.0"
+chrono = "0.4.31"
+dora-node-api = { git = "https://github.com/dora-rs/dora.git", tag = "v0.3.12", features = ["tracing"] }
+eyre = "0.6.8"
+figment = { version = "0.10.0", features = ["env", "json", "toml", "yaml"] }
+futures = "0.3.31"
+outfox-openai = { version = "0.2.0", git = "https://github.com/outfox-ai/outfox.git" }
+reqwest = { version = "0.12.22", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest-eventsource = "0.6.0"
+rmcp = { version = "0.3.2", git = "https://github.com/modelcontextprotocol/rust-sdk.git", rev = "fbc7ab7", features = [
+    "client",
+    "transport-child-process",
+    "transport-sse-client",
+    "transport-streamable-http-client",
+    "reqwest",
+] }
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"
+thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["full"] }
+tokio-stream = "0.1.11"
+tokio-util = "0.7"
+tracing = "0.1.27"
+tracing-subscriber = "0.3"
+uuid = { version = "1.10", features = ["v4"] }

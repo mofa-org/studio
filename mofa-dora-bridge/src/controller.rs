@@ -117,10 +117,10 @@ impl DataflowController {
 
     /// Ensure dora daemon is running
     pub fn ensure_daemon(&mut self) -> BridgeResult<()> {
-        // Check if daemon is already running
+        // Check if daemon is already running by using `dora list`
+        // If it succeeds, daemon is running
         let status = Command::new("dora")
-            .arg("daemon")
-            .arg("--check")
+            .arg("list")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -133,8 +133,7 @@ impl DataflowController {
             _ => {
                 info!("Starting dora daemon...");
                 let child = Command::new("dora")
-                    .arg("daemon")
-                    .arg("--quiet")
+                    .arg("up")
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
                     .spawn()
@@ -143,7 +142,7 @@ impl DataflowController {
                 self.daemon_process = Some(child);
 
                 // Wait for daemon to be ready
-                std::thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(1000));
                 Ok(())
             }
         }
@@ -173,11 +172,17 @@ impl DataflowController {
             return Err(BridgeError::StartFailed(msg));
         }
 
-        // Build command
+        // Build command - run from dataflow's directory with just the filename
+        let dataflow_dir = self.dataflow_path.parent()
+            .ok_or_else(|| BridgeError::StartFailed("Invalid dataflow path".to_string()))?;
+        let dataflow_filename = self.dataflow_path.file_name()
+            .ok_or_else(|| BridgeError::StartFailed("Invalid dataflow filename".to_string()))?;
+
         let mut cmd = Command::new("dora");
         cmd.arg("start")
-            .arg(&self.dataflow_path)
-            .arg("--detach");
+            .arg(dataflow_filename)
+            .arg("--detach")
+            .current_dir(dataflow_dir);
 
         // Add environment variables
         for (key, value) in &self.env_vars {

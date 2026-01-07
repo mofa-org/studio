@@ -1,0 +1,27 @@
+[package]
+name = "dora-maas-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+documentation.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-openai = "0.29"
+async-trait = "0.1"
+chrono = "0.4.31"
+dora-node-api = { workspace = true, features = ["tracing"] }
+eyre = "0.6.8"
+figment = { version = "0.10.0", features = ["env", "json", "toml", "yaml"] }
+futures = "0.3.31"
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"
+thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["full"] }
+tracing = "0.1.27"
+tracing-subscriber = "0.3"
+uuid = { version = "1.10", features = ["v4"] }

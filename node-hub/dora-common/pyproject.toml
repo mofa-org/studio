@@ -1,0 +1,18 @@
+[project]
+name = "dora-common"
+version = "0.1.0"
+description = "Common utilities for Dora nodes"
+requires-python = ">=3.8"
+dependencies = [
+    "dora-rs>=0.3.7",
+    "pyarrow>=10.0.0",
+]
+
+[project.scripts]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dora_common*"]

@@ -1674,26 +1674,11 @@ impl MoFaFMScreen {
         // Start timer to poll for dora events (100ms interval)
         self.dora_timer = cx.start_interval(0.1);
 
-        // Look for default dataflow in the app's dataflow directory
-        // Try multiple locations: current dir, and relative to executable
+        // Look for default dataflow relative to current working directory
         let dataflow_path = std::env::current_dir()
             .ok()
             .map(|p| p.join("dataflow").join("voice-chat.yml"))
-            .filter(|p| p.exists())
-            .or_else(|| {
-                // Try relative to executable (for running from workspace root)
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                    .map(|p| p.join("../../../apps/mofa-fm/dataflow/voice-chat.yml"))
-                    .map(|p| p.canonicalize().unwrap_or(p))
-                    .filter(|p| p.exists())
-            })
-            .or_else(|| {
-                // Hardcoded fallback for development
-                let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dataflow/voice-chat.yml");
-                if fallback.exists() { Some(fallback) } else { None }
-            });
+            .filter(|p| p.exists());
         self.dataflow_path = dataflow_path;
 
         ::log::info!("Dora integration initialized, dataflow: {:?}", self.dataflow_path);
@@ -2112,27 +2097,12 @@ impl MoFaFMScreen {
             if has_deepseek { "✓" } else { "✗" }
         ));
 
-        // Find the dataflow file
+        // Find the dataflow file relative to current working directory
         let dataflow_path = self.dataflow_path.clone().unwrap_or_else(|| {
-            // Try to find default dataflow relative to the mofa-fm app directory
-            // First check the manifest directory (where Cargo.toml is)
-            let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let default_path = manifest_dir.join("dataflow").join("voice-chat.yml");
-            if default_path.exists() {
-                return default_path;
-            }
-
-            // Fallback: try relative to current working directory
-            let cwd = std::env::current_dir().unwrap_or_default();
-
-            // Try apps/mofa-fm/dataflow (if running from mofa-studio root)
-            let alt_path = cwd.join("apps").join("mofa-fm").join("dataflow").join("voice-chat.yml");
-            if alt_path.exists() {
-                return alt_path;
-            }
-
-            // Last resort: assume cwd is mofa-fm directory
-            cwd.join("dataflow").join("voice-chat.yml")
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join("dataflow")
+                .join("voice-chat.yml")
         });
 
         if !dataflow_path.exists() {

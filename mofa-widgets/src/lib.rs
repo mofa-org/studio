@@ -83,7 +83,7 @@ pub mod audio_player;
 pub mod app_trait;
 
 // Re-export app trait types for convenience
-pub use app_trait::{MofaApp, TimerControl, AppInfo, AppRegistry};
+pub use app_trait::{MofaApp, TimerControl, AppInfo, AppRegistry, StateChangeListener};
 
 use makepad_widgets::Cx;
 

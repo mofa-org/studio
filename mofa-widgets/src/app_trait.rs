@@ -155,3 +155,29 @@ impl Default for AppRegistry {
         Self::new()
     }
 }
+
+/// Trait for widgets that respond to global state changes
+///
+/// Apps implement this trait to receive notifications when global state
+/// changes (e.g., dark mode toggle, provider configuration updates).
+///
+/// # Example
+/// ```ignore
+/// impl StateChangeListener for MyScreenRef {
+///     fn on_dark_mode_change(&self, cx: &mut Cx, dark_mode: f64) {
+///         if let Some(mut inner) = self.borrow_mut() {
+///             inner.view.apply_over(cx, live!{
+///                 draw_bg: { dark_mode: (dark_mode) }
+///             });
+///         }
+///     }
+/// }
+/// ```
+pub trait StateChangeListener {
+    /// Called when dark mode setting changes
+    ///
+    /// # Arguments
+    /// * `cx` - Makepad context for applying UI updates
+    /// * `dark_mode` - Dark mode value (0.0 = light, 1.0 = dark)
+    fn on_dark_mode_change(&self, cx: &mut Cx, dark_mode: f64);
+}

@@ -1,0 +1,32 @@
+[project]
+name = "dora-asr"
+version = "0.1.0"
+authors = [
+    {name = "Dora Contributors"},
+]
+description = "Multi-engine ASR node for Dora with Whisper and FunASR support"
+readme = "README.md"
+
+dependencies = [
+    "dora-rs>=0.3.7",
+    "numpy>=1.21.0,<2.0",  # CRITICAL: Must be 1.x (1.26.4 recommended) for compatibility
+    "scipy>=1.11.0,<1.12.0",  # Required by librosa, use 1.11.4 for Python 3.12
+    "pyarrow>=10.0.0",
+    "pywhispercpp @ git+https://github.com/absadiki/pywhispercpp.git",
+    "funasr-onnx>=0.3.2,<0.5.0",  # Compatible versions
+    "librosa>=0.10.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "onnxruntime-gpu>=1.16.0",  # For FunASR GPU acceleration
+    "torch>=2.0.0,<2.3.0",       # Compatible with voice chat pipeline
+    "torchaudio>=2.0.0,<2.3.0",  # Match torch version range
+    "torchvision>=0.15.0,<0.18.0",  # Compatible torchvision range
+]
+
+[project.scripts]
+dora-asr = "dora_asr.main:main"
+
+[project.entry-points."dora.nodes"]
+dora-asr = "dora_asr.main:main"

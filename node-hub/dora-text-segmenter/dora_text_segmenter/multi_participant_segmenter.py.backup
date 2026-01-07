@@ -1,0 +1,588 @@
+#!/usr/bin/env python3
+"""
+Multi-Participant Queue-based Text Segmenter with FIFO Session Management
+
+Features:
+1. Accepts 3 LLM inputs: student1, student2, tutor
+2. FIFO session queue - processes participants in arrival order
+3. Session detection via metadata.session_status (started/ended)
+4. Preserves all existing segmentation logic
+5. 3 output ports: text_segment_student1, text_segment_student2, text_segment_tutor
+6. 3 TTS backpressure signals: tts_complete_student1, tts_complete_student2, tts_complete_tutor
+7. Reset/Cancel commands initialize to initial stage
+8. Speaker ID removal for all 3 participants
+"""
+
+import os
+import time
+import re
+import json
+from typing import Optional, List, Dict
+from dataclasses import dataclass, field
+import pyarrow as pa
+from dora import Node
+from collections import deque
+
+
+@dataclass
+class SessionState:
+    """Tracks state for one participant's speaking session"""
+    participant: str           # "student1" | "student2" | "tutor"
+    status: str               # "started" | "streaming" | "ended"
+    chunks: List[str] = field(default_factory=list)  # Accumulated text chunks while queued
+    text_buffer: str = ""     # Incomplete segment text
+    question_id: Optional[int] = None
+    metadata: Dict = field(default_factory=dict)  # Original metadata from first chunk
+    start_time: float = field(default_factory=time.time)
+
+
+def send_log(node, level, message, config_level="INFO"):
+    """Send log message through log output channel."""
+    LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+
+    if LOG_LEVELS.get(level, 0) < LOG_LEVELS.get(config_level, 20):
+        return
+
+    formatted_message = f"[{level}] {message}"
+    log_data = {
+        "node": "multi-text-segmenter",
+        "level": level,
+        "message": formatted_message,
+        "timestamp": time.time()
+    }
+    node.send_output("log", pa.array([json.dumps(log_data)]))
+
+
+def parse_int_env(name: str, default: int) -> int:
+    """Safely parse integer environment variables with fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def remove_speaker_id(text, node=None, log_level="INFO"):
+    """Remove speaker names enclosed in square brackets like [Student1], [Tutor], [孙老师], etc.
+
+    Args:
+        text: Input text that may contain speaker IDs
+        node: Dora node for logging (optional)
+        log_level: Log level for filtering
+
+    Returns:
+        Text with speaker IDs removed
+    """
+    # Pattern: [any text] ONLY at the beginning of the string
+    pattern = r'^\[[^\]]+\]\s*'
+    cleaned_text = re.sub(pattern, '', text)
+
+    if node and cleaned_text != text:
+        send_log(node, "DEBUG", f"Removed speaker ID: '{text}' → '{cleaned_text}'", log_level)
+
+    return cleaned_text
+
+
+def should_skip_segment(text, punctuation_marks="。！？.!?", node=None, log_level="INFO"):
+    """Check if segment should be skipped (only punctuation or numbers)"""
+    text_stripped = text.strip()
+
+    if not text_stripped:
+        if node:
+            send_log(node, "DEBUG", f"Filter: SKIP empty: '{text}'", log_level)
+        return True
+
+    # Escape special regex characters in punctuation marks
+    escaped_punctuation = re.escape(punctuation_marks)
+    # Match: only punctuation, numbers, and whitespace
+    pattern = f'^[{escaped_punctuation}0-9\\s]+$'
+
+    if re.match(pattern, text_stripped):
+        if node:
+            send_log(node, "DEBUG", f"Filter: SKIP punctuation-only: '{text}'", log_level)
+        return True
+
+    return False
+
+
+def segment_by_punctuation(text, min_length=5, max_length=100, punctuation=None,
+                           node=None, log_level="INFO"):
+    """Segment text by punctuation marks, respecting length constraints.
+
+    EXISTING LOGIC PRESERVED - unchanged from original implementation.
+    """
+    if punctuation is None:
+        punctuation = "。！？.!?"
+
+    segments = []
+    current_segment = ""
+
+    for char in text:
+        current_segment += char
+
+        if char in punctuation and len(current_segment) >= min_length:
+            # Found end-of-sentence punctuation and met minimum length
+            segments.append(current_segment.strip())
+            current_segment = ""
+        elif max_length > 0 and len(current_segment) >= max_length:
+            # Exceeded max length, but don't split mid-sentence
+            # Keep accumulating until we hit punctuation
+            pass
+
+    # Return incomplete text for next round
+    incomplete_text = current_segment
+    keep_incomplete = True
+
+    return segments, incomplete_text, keep_incomplete
+
+
+def detect_session_event(metadata: Dict) -> str:
+    """Detect session lifecycle events from metadata"""
+    session_status = metadata.get("session_status", "")
+
+    if session_status == "started":
+        return "SESSION_START"
+    elif session_status == "ended":
+        return "SESSION_END"
+    else:
+        return "SESSION_CHUNK"  # Normal streaming chunk
+
+
+def find_session_in_queue(session_queue: deque, participant: str) -> Optional[SessionState]:
+    """Find a session for given participant in the queue"""
+    for session in session_queue:
+        if session.participant == participant:
+            return session
+    return None
+
+
+def main():
+    print("[STARTUP] multi_participant_segmenter.py main() called", flush=True)
+    node = Node()
+    print("[STARTUP] Node created", flush=True)
+
+    # Configuration
+    min_segment_length = max(1, parse_int_env("MIN_SEGMENT_LENGTH", 5))
+    max_segment_length = parse_int_env("MAX_SEGMENT_LENGTH", 15)
+    punctuation_marks = os.getenv("PUNCTUATION_MARKS", "。！？.!?，,、；：""''（）【】《》")
+    log_level = os.getenv("LOG_LEVEL", "INFO")
+    segment_mode = os.getenv("SEGMENT_MODE", "sentence").lower()
+    remove_speaker_id_enabled = os.getenv("REMOVE_SPEAKER_ID", "true").lower() in {"1", "true", "yes"}
+
+    print(f"[STARTUP] Config: mode={segment_mode}, min={min_segment_length}, max={max_segment_length}, remove_speaker_id={remove_speaker_id_enabled}", flush=True)
+
+    send_log(
+        node,
+        "INFO",
+        f"Multi-Participant Segmenter configured — mode: {segment_mode}, "
+        f"min: {min_segment_length}, max: {max_segment_length}, "
+        f"punctuation: '{punctuation_marks}', remove_speaker_id: {remove_speaker_id_enabled}",
+        log_level,
+    )
+
+    # Per-participant segment queues (each participant processes independently)
+    segment_queues = {
+        "student1": deque(),
+        "student2": deque(),
+        "tutor": deque()
+    }
+
+    # Per-participant text buffers
+    text_buffers = {
+        "student1": "",
+        "student2": "",
+        "tutor": ""
+    }
+
+    # Per-participant session tracking
+    active_sessions = {
+        "student1": None,
+        "student2": None,
+        "tutor": None
+    }
+
+    # Per-participant backpressure tracking (each TTS operates independently)
+    is_sending = {
+        "student1": False,
+        "student2": False,
+        "tutor": False
+    }
+
+    send_log(node, "INFO", "Multi-Participant Text Segmenter started", log_level)
+    print("[STARTUP] Entering event loop", flush=True)
+
+    for event in node:
+        print(f"[EVENT] Received event: type={event['type']}, id={event.get('id', 'N/A')}", flush=True)
+        if event["type"] == "INPUT":
+            event_id = event["id"]
+
+            # Handle 3 LLM inputs (each participant processes independently)
+            if event_id in ["student1", "student2", "tutor"]:
+                print(f"[EVENT] Processing LLM input from {event_id}", flush=True)
+                participant = event_id
+                text = event["value"][0].as_py() if event.get("value") else ""
+                metadata = event.get("metadata", {})
+                session_event = detect_session_event(metadata)
+
+                if session_event == "SESSION_START":
+                    # New session starting for this participant
+                    active_sessions[participant] = SessionState(
+                        participant=participant,
+                        status="started",
+                        chunks=[],
+                        text_buffer="",
+                        question_id=metadata.get("question_id"),
+                        metadata=metadata.copy(),
+                        start_time=time.time()
+                    )
+                    send_log(node, "INFO",
+                        f"📥 NEW SESSION started: {participant}, question_id={active_sessions[participant].question_id}",
+                        log_level)
+
+                elif session_event == "SESSION_CHUNK":
+                    # Find the session for this participant
+                    session = None
+                    if active_session and active_session.participant == participant:
+                        session = active_session
+                    else:
+                        session = find_session_in_queue(session_queue, participant)
+
+                    if session:
+                        session.status = "streaming"
+
+                        # If this is the active session, process immediately
+                        if session == active_session:
+                            # Apply speaker ID removal if enabled
+                            if remove_speaker_id_enabled:
+                                text = remove_speaker_id(text, node, log_level)
+
+                            send_log(node, "INFO",
+                                f"🔵 RAW INPUT from {participant}: '{text}' (len={len(text)})", log_level)
+
+                            # Combine with text buffer
+                            combined_text = active_session.text_buffer + text
+                            send_log(node, "INFO",
+                                f"🟡 COMBINED TEXT (buffer + new): '{combined_text}' (len={len(combined_text)})",
+                                log_level)
+
+                            # Segment by punctuation (EXISTING LOGIC)
+                            complete_segments, incomplete_text, keep_incomplete = segment_by_punctuation(
+                                combined_text,
+                                min_segment_length,
+                                max_segment_length,
+                                punctuation_marks,
+                                node,
+                                log_level
+                            )
+
+                            # Update text buffer
+                            active_session.text_buffer = incomplete_text if keep_incomplete else ""
+
+                            send_log(node, "INFO",
+                                f"🟢 SEGMENTATION OUTPUT: {len(complete_segments)} segments, "
+                                f"incomplete: '{incomplete_text}' (len={len(incomplete_text)})", log_level)
+
+                            # Queue segments
+                            for i, segment_text in enumerate(complete_segments):
+                                if not should_skip_segment(segment_text, punctuation_marks, node, log_level):
+                                    segment_queue.append({
+                                        "text": segment_text,
+                                        "participant": participant,
+                                        "metadata": metadata.copy()
+                                    })
+                                    send_log(node, "DEBUG",
+                                        f"Queued segment {i}: '{segment_text}' (total: {len(segment_queue)})",
+                                        log_level)
+
+                            # Try to send segments to any available TTS (per-participant backpressure)
+                            while segment_queue:
+                                # Peek at the next segment
+                                segment = segment_queue[0]
+                                segment_participant = segment['participant']
+
+                                # Check if this participant's TTS is available
+                                if not is_sending[segment_participant]:
+                                    segment = segment_queue.popleft()
+                                    output_port = f"text_segment_{segment_participant}"
+
+                                    send_log(node, "INFO",
+                                        f"🎤 Sending to {segment_participant} TTS: '{segment['text']}' "
+                                        f"(len={len(segment['text'])}, segments_remaining={len(segment_queue)})",
+                                        log_level)
+
+                                    node.send_output(
+                                        output_port,
+                                        pa.array([segment["text"]]),
+                                        metadata=segment["metadata"]
+                                    )
+                                    is_sending[segment_participant] = True
+                                else:
+                                    # This participant's TTS is busy, stop checking
+                                    break
+                        else:
+                            # Session is queued, store chunk for later processing
+                            session.chunks.append(text)
+                            send_log(node, "DEBUG",
+                                f"Stored chunk for queued session {participant}: '{text}'", log_level)
+                    else:
+                        send_log(node, "WARNING",
+                            f"Received chunk for {participant} but no session found", log_level)
+
+                elif session_event == "SESSION_END":
+                    # Mark session as ended
+                    session = None
+                    if active_session and active_session.participant == participant:
+                        session = active_session
+                    else:
+                        session = find_session_in_queue(session_queue, participant)
+
+                    if session:
+                        session.status = "ended"
+                        send_log(node, "INFO", f"🏁 SESSION ENDED: {participant}", log_level)
+
+                        # If this is active session and all segments sent, activate next
+                        if session == active_session and not is_sending[participant] and not segment_queue:
+                            send_log(node, "INFO",
+                                f"✅ Session COMPLETE: {participant} (duration: {time.time() - session.start_time:.1f}s)",
+                                log_level)
+
+                            # Activate next session
+                            if session_queue:
+                                active_session = session_queue.popleft()
+                                active_session.text_buffer = ""
+                                # Reset backpressure for new session (other participants may still be sending)
+                                segment_queue.clear()
+
+                                send_log(node, "INFO",
+                                    f"🚀 ACTIVATED SESSION: {active_session.participant}", log_level)
+
+                                # Process any chunks that arrived while queued
+                                for chunk in active_session.chunks:
+                                    send_log(node, "DEBUG",
+                                        f"Processing queued chunk for {active_session.participant}: '{chunk}'",
+                                        log_level)
+
+                                    # Apply speaker ID removal if enabled
+                                    if remove_speaker_id_enabled:
+                                        chunk = remove_speaker_id(chunk, node, log_level)
+
+                                    # Combine with text buffer
+                                    combined_text = active_session.text_buffer + chunk
+
+                                    # Segment by punctuation
+                                    complete_segments, incomplete_text, keep_incomplete = segment_by_punctuation(
+                                        combined_text,
+                                        min_segment_length,
+                                        max_segment_length,
+                                        punctuation_marks,
+                                        node,
+                                        log_level
+                                    )
+
+                                    # Update text buffer
+                                    active_session.text_buffer = incomplete_text if keep_incomplete else ""
+
+                                    # Queue segments
+                                    for segment_text in complete_segments:
+                                        if not should_skip_segment(segment_text, punctuation_marks, node, log_level):
+                                            segment_queue.append({
+                                                "text": segment_text,
+                                                "participant": active_session.participant,
+                                                "metadata": active_session.metadata.copy()
+                                            })
+
+                                active_session.chunks.clear()
+
+                                # COLD START: Flush any incomplete text in buffer
+                                if active_session.text_buffer.strip():
+                                    incomplete_text = active_session.text_buffer.strip()
+                                    if not should_skip_segment(incomplete_text, punctuation_marks, node, log_level):
+                                        segment_queue.append({
+                                            "text": incomplete_text,
+                                            "participant": active_session.participant,
+                                            "metadata": active_session.metadata.copy()
+                                        })
+                                        send_log(node, "INFO",
+                                            f"🔥 COLD START: Flushed incomplete buffer for {active_session.participant}: '{incomplete_text}'",
+                                            log_level)
+                                    active_session.text_buffer = ""
+
+                                # Send segments to any available TTS (per-participant backpressure)
+                                while segment_queue:
+                                    segment = segment_queue[0]
+                                    segment_participant = segment['participant']
+
+                                    if not is_sending[segment_participant]:
+                                        segment = segment_queue.popleft()
+                                        output_port = f"text_segment_{segment_participant}"
+
+                                        send_log(node, "INFO",
+                                            f"🎤 Sending queued segment to {segment_participant} TTS: '{segment['text']}'",
+                                            log_level)
+
+                                        node.send_output(
+                                            output_port,
+                                            pa.array([segment["text"]]),
+                                            metadata=segment["metadata"]
+                                        )
+                                        is_sending[segment_participant] = True
+                                    else:
+                                        break
+                            else:
+                                active_session = None
+                                send_log(node, "INFO", "💤 No more sessions in queue", log_level)
+
+            # Handle 3 TTS complete signals (each TTS operates independently)
+            elif event_id in ["tts_complete_student1", "tts_complete_student2", "tts_complete_tutor"]:
+                participant = event_id.replace("tts_complete_", "")
+
+                # Mark this participant's TTS as available
+                is_sending[participant] = False
+                send_log(node, "DEBUG", f"✅ TTS complete from {participant}, marked as available", log_level)
+
+                # Look for next segment for THIS participant in the queue
+                next_segment_for_participant = None
+                for seg in segment_queue:
+                    if seg['participant'] == participant:
+                        next_segment_for_participant = seg
+                        break
+
+                if next_segment_for_participant:
+                    # Send next segment for this participant
+                    segment_queue.remove(next_segment_for_participant)
+                    output_port = f"text_segment_{participant}"
+
+                    send_log(node, "INFO",
+                        f"🎤 Sending next segment to {participant} TTS: '{next_segment_for_participant['text']}' "
+                        f"(len={len(next_segment_for_participant['text'])}, remaining={len(segment_queue)})", log_level)
+
+                    node.send_output(
+                        output_port,
+                        pa.array([next_segment_for_participant["text"]]),
+                        metadata=next_segment_for_participant["metadata"]
+                    )
+                    is_sending[participant] = True
+                else:
+                    # No more segments for this participant
+                    send_log(node, "DEBUG", f"No more segments for {participant}", log_level)
+
+                    # If this is the active session and it ended, switch to next session
+                    if active_session and active_session.participant == participant and active_session.status == "ended":
+                            send_log(node, "INFO",
+                                f"✅ Session COMPLETE: {participant} (duration: {time.time() - active_session.start_time:.1f}s)",
+                                log_level)
+
+                            # Activate next session
+                            if session_queue:
+                                active_session = session_queue.popleft()
+                                active_session.text_buffer = ""
+                                segment_queue.clear()
+
+                                send_log(node, "INFO",
+                                    f"🚀 ACTIVATED SESSION: {active_session.participant}", log_level)
+
+                                # Process queued chunks
+                                for chunk in active_session.chunks:
+                                    send_log(node, "DEBUG",
+                                        f"Processing queued chunk for {active_session.participant}: '{chunk}'",
+                                        log_level)
+
+                                    # Apply speaker ID removal if enabled
+                                    if remove_speaker_id_enabled:
+                                        chunk = remove_speaker_id(chunk, node, log_level)
+
+                                    # Combine with text buffer
+                                    combined_text = active_session.text_buffer + chunk
+
+                                    # Segment by punctuation
+                                    complete_segments, incomplete_text, keep_incomplete = segment_by_punctuation(
+                                        combined_text,
+                                        min_segment_length,
+                                        max_segment_length,
+                                        punctuation_marks,
+                                        node,
+                                        log_level
+                                    )
+
+                                    # Update text buffer
+                                    active_session.text_buffer = incomplete_text if keep_incomplete else ""
+
+                                    # Queue segments
+                                    for segment_text in complete_segments:
+                                        if not should_skip_segment(segment_text, punctuation_marks, node, log_level):
+                                            segment_queue.append({
+                                                "text": segment_text,
+                                                "participant": active_session.participant,
+                                                "metadata": active_session.metadata.copy()
+                                            })
+
+                                active_session.chunks.clear()
+
+                                # COLD START: Flush any incomplete text in buffer when session becomes active
+                                if active_session.text_buffer.strip():
+                                    incomplete_text = active_session.text_buffer.strip()
+                                    if not should_skip_segment(incomplete_text, punctuation_marks, node, log_level):
+                                        segment_queue.append({
+                                            "text": incomplete_text,
+                                            "participant": active_session.participant,
+                                            "metadata": active_session.metadata.copy()
+                                        })
+                                        send_log(node, "INFO",
+                                            f"🔥 COLD START: Flushed incomplete buffer for {active_session.participant}: '{incomplete_text}'",
+                                            log_level)
+                                    active_session.text_buffer = ""
+
+                                # Send segments to any available TTS (per-participant backpressure)
+                                while segment_queue:
+                                    segment = segment_queue[0]
+                                    segment_participant = segment['participant']
+
+                                    if not is_sending[segment_participant]:
+                                        segment = segment_queue.popleft()
+                                        output_port = f"text_segment_{segment_participant}"
+
+                                        send_log(node, "INFO",
+                                            f"🎤 Sending queued segment to {segment_participant} TTS: '{segment['text']}'",
+                                            log_level)
+
+                                        node.send_output(
+                                            output_port,
+                                            pa.array([segment["text"]]),
+                                            metadata=segment["metadata"]
+                                        )
+                                        is_sending[segment_participant] = True
+                                    else:
+                                        break
+                            else:
+                                active_session = None
+                                send_log(node, "INFO", "💤 No more sessions in queue", log_level)
+
+            # Handle reset and cancel commands
+            elif event_id in ["reset", "control"]:
+                command = event["value"][0].as_py() if event.get("value") else None
+
+                # Both "reset" and "cancel" initialize to initial stage
+                if command in ["reset", "cancel"]:
+                    send_log(node, "INFO",
+                        f"🔄 {command.upper()} - Clearing all sessions and queues", log_level)
+
+                    # Initialize to initial stage
+                    session_queue.clear()
+                    active_session = None
+                    segment_queue.clear()
+                    # Reset per-participant backpressure
+                    is_sending = {
+                        "student1": False,
+                        "student2": False,
+                        "tutor": False
+                    }
+
+                    send_log(node, "INFO",
+                        f"✅ {command.upper()} complete - initialized to initial stage", log_level)
+
+
+if __name__ == "__main__":
+    main()

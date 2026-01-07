@@ -33,3 +33,16 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.temp
+
+# Dora output directories
+out/
+**/out/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+.eggs/
+dist/
+build/
+setup.py

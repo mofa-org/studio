@@ -79,9 +79,9 @@ class PrimeSpeechConfig:
 VOICE_CONFIGS = {
     "Doubao": {
         "repository": "MoYoYoTech/tone-models",
-        "gpt_weights": "GPT_weights/doubao-mixed.ckpt",
-        "sovits_weights": "SoVITS_weights/doubao-mixed.pth",
-        "reference_audio": "ref_audios/doubao_ref_mix_new.wav",
+        "gpt_weights": "GPT_weights/doubao_best_gpt.ckpt",
+        "sovits_weights": "SoVITS_weights/doubao_best_sovits.pth",
+        "reference_audio": "ref_audios/doubao_ref.wav",
         "prompt_text": "这家resturant的steak很有名，但是vegetable salad的price有点贵",
         "text_lang": "zh",
         "prompt_lang": "zh",

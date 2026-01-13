@@ -406,31 +406,32 @@ impl MoFaFMScreen {
     }
 
     /// Load API keys from preferences
+    /// Exports all provider API keys including custom providers
     pub(super) fn load_api_keys_from_preferences(&self) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
         // Load preferences
         let prefs = Preferences::load();
 
-        // Get OpenAI API key
-        if let Some(provider) = prefs.get_provider("openai") {
+        // Export API keys for ALL providers (built-in and custom)
+        for provider in &prefs.providers {
             if let Some(ref api_key) = provider.api_key {
                 if !api_key.is_empty() {
-                    env_vars.insert("OPENAI_API_KEY".to_string(), api_key.clone());
+                    // Map provider ID to standard env var name
+                    let env_var_name = match provider.id.as_str() {
+                        "openai" => "OPENAI_API_KEY".to_string(),
+                        "deepseek" => "DEEPSEEK_API_KEY".to_string(),
+                        "alibaba_cloud" => "ALIBABA_CLOUD_API_KEY".to_string(),
+                        "nvidia" => "NVIDIA_API_KEY".to_string(),
+                        // For custom providers, use uppercase ID + _API_KEY
+                        id => format!("{}_API_KEY", id.to_uppercase().replace('-', "_")),
+                    };
+                    env_vars.insert(env_var_name, api_key.clone());
                 }
             }
         }
 
-        // Get DeepSeek API key
-        if let Some(provider) = prefs.get_provider("deepseek") {
-            if let Some(ref api_key) = provider.api_key {
-                if !api_key.is_empty() {
-                    env_vars.insert("DEEPSEEK_API_KEY".to_string(), api_key.clone());
-                }
-            }
-        }
-
-        // Get Alibaba Cloud API key
+        // Also export DASHSCOPE_API_KEY for backwards compatibility with alibaba_cloud
         if let Some(provider) = prefs.get_provider("alibaba_cloud") {
             if let Some(ref api_key) = provider.api_key {
                 if !api_key.is_empty() {

@@ -14,7 +14,7 @@ mod dora_handlers;
 mod log_panel;
 mod role_config;
 
-use role_config::{RoleConfig, get_role_config_path};
+use role_config::{RoleConfig, get_role_config_path, VOICE_OPTIONS};
 
 use makepad_widgets::*;
 use crate::mofa_hero::{MofaHeroWidgetExt, MofaHeroAction};
@@ -23,6 +23,17 @@ use crate::dora_integration::{DoraIntegration, DoraCommand};
 use mofa_widgets::participant_panel::ParticipantPanelWidgetExt;
 use mofa_widgets::{StateChangeListener, TimerControl};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+/// Data preloaded in background thread
+#[derive(Default)]
+struct PreloadedData {
+    context_content: Option<String>,
+    student1_config: Option<RoleConfig>,
+    student2_config: Option<RoleConfig>,
+    tutor_config: Option<RoleConfig>,
+    loading_complete: bool,
+}
 
 /// Register live design for this module
 pub fn live_design(cx: &mut Cx) {
@@ -145,8 +156,6 @@ pub struct MoFaFMScreen {
     // Context content loaded from study-context.md
     #[rust]
     context_content: String,
-    #[rust]
-    context_loaded: bool,
 
     // Role configurations
     #[rust]
@@ -155,12 +164,28 @@ pub struct MoFaFMScreen {
     student2_config: RoleConfig,
     #[rust]
     tutor_config: RoleConfig,
+    // Background preloading - configs loaded into memory at startup
     #[rust]
-    role_configs_loaded: bool,
+    configs_preloaded: bool,
+    // Async preloaded data from background thread
+    #[rust]
+    async_preload: Option<Arc<Mutex<PreloadedData>>>,
+    // Lazy UI population flags - track which TextInputs have been populated
+    #[rust]
+    context_ui_populated: bool,
+    #[rust]
+    student1_ui_populated: bool,
+    #[rust]
+    student2_ui_populated: bool,
+    #[rust]
+    tutor_ui_populated: bool,
 
     // Editor maximize state: None = normal, Some(id) = maximized editor
     #[rust]
     maximized_editor: Option<String>,
+    // Shader pre-compilation: hide Settings tab after first draw
+    #[rust]
+    shader_precompile_frame: usize,
 }
 
 impl Widget for MoFaFMScreen {
@@ -169,10 +194,42 @@ impl Widget for MoFaFMScreen {
 
         // Initialize audio and log bridge on first event
         if !self.audio_initialized {
-            // Initialize log bridge to capture Rust logs
             log_bridge::init();
             self.init_audio(cx);
             self.audio_initialized = true;
+            // Start async preloading in background thread
+            self.start_async_preload();
+        }
+
+        // Check if async preload completed - store data and trigger UI population
+        if !self.configs_preloaded {
+            let mut preload_ready = false;
+            if let Some(ref preload) = self.async_preload {
+                if let Ok(mut data) = preload.try_lock() {
+                    if data.loading_complete {
+                        if let Some(content) = data.context_content.take() {
+                            self.context_content = content;
+                        }
+                        if let Some(config) = data.student1_config.take() {
+                            self.student1_config = config;
+                        }
+                        if let Some(config) = data.student2_config.take() {
+                            self.student2_config = config;
+                        }
+                        if let Some(config) = data.tutor_config.take() {
+                            self.tutor_config = config;
+                        }
+                        preload_ready = true;
+                    }
+                }
+            }
+            if preload_ready {
+                self.configs_preloaded = true;
+                // Trigger UI population on next frame
+                self.shader_precompile_frame = 1;
+                cx.new_next_frame();
+                ::log::info!("Async preload complete - triggering UI population");
+            }
         }
 
         // Handle audio timer for mic level updates, log polling, and buffer status
@@ -261,6 +318,37 @@ impl Widget for MoFaFMScreen {
                 needs_redraw = true;
                 if self.copy_log_flash_active {
                     cx.new_next_frame();
+                }
+            }
+
+            // Populate TextInputs and force render at startup
+            if self.shader_precompile_frame > 0 && self.configs_preloaded {
+                match self.shader_precompile_frame {
+                    1 => {
+                        // Step 1: Populate content and show Settings tab
+                        self.lazy_populate_editor(cx, "context");
+                        self.lazy_populate_editor(cx, "student1");
+                        self.lazy_populate_editor(cx, "student2");
+                        self.lazy_populate_editor(cx, "tutor");
+                        self.view.view(ids!(left_column.settings_tab_content)).set_visible(cx, true);
+                        ::log::info!("Startup: Content loaded, Settings visible for pre-render");
+                        self.shader_precompile_frame = 2;
+                        cx.new_next_frame();
+                        needs_redraw = true;
+                    }
+                    5 => {
+                        // Step 2: After a few frames, hide Settings and show Running
+                        self.view.view(ids!(left_column.settings_tab_content)).set_visible(cx, false);
+                        self.view.view(ids!(left_column.running_tab_content)).set_visible(cx, true);
+                        self.shader_precompile_frame = 0;
+                        ::log::info!("Startup: Pre-render complete, Settings hidden");
+                        needs_redraw = true;
+                    }
+                    _ => {
+                        // Keep rendering for a few frames
+                        self.shader_precompile_frame += 1;
+                        cx.new_next_frame();
+                    }
                 }
             }
 
@@ -505,19 +593,19 @@ impl Widget for MoFaFMScreen {
             _ => {}
         }
 
-        let student1_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_header.student1_maximize_btn));
+        let student1_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_header.student1_maximize_btn));
         match event.hits(cx, student1_max_btn.area()) {
             Hit::FingerUp(_) => { self.toggle_maximize(cx, "student1"); }
             _ => {}
         }
 
-        let student2_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_header.student2_maximize_btn));
+        let student2_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_header.student2_maximize_btn));
         match event.hits(cx, student2_max_btn.area()) {
             Hit::FingerUp(_) => { self.toggle_maximize(cx, "student2"); }
             _ => {}
         }
 
-        let tutor_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_header.tutor_maximize_btn));
+        let tutor_max_btn = self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_header.tutor_maximize_btn));
         match event.hits(cx, tutor_max_btn.area()) {
             Hit::FingerUp(_) => { self.toggle_maximize(cx, "tutor"); }
             _ => {}
@@ -565,61 +653,8 @@ impl MoFaFMScreen {
         self.view.view(ids!(left_column.running_tab_content)).set_visible(cx, tab == 0);
         self.view.view(ids!(left_column.settings_tab_content)).set_visible(cx, tab == 1);
 
-        // Load context and role configs when switching to settings tab
-        if tab == 1 {
-            if !self.context_loaded {
-                self.load_context(cx);
-            }
-            if !self.role_configs_loaded {
-                self.load_role_configs(cx);
-            }
-        }
-
+        // Content already populated at startup - just show/hide
         self.view.redraw(cx);
-    }
-
-    /// Load role configurations from TOML files
-    fn load_role_configs(&mut self, cx: &mut Cx) {
-        // Load student1 config
-        let student1_path = get_role_config_path(self.dataflow_path.as_ref(), "student1");
-        match RoleConfig::load(&student1_path) {
-            Ok(config) => {
-                self.populate_role_dropdown(cx, "student1", &config.models, &config.default_model);
-                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container.student1_prompt_scroll.student1_prompt_wrapper.student1_prompt_input))
-                    .set_text(cx, &config.system_prompt);
-                self.student1_config = config;
-                ::log::info!("Loaded student1 config");
-            }
-            Err(e) => ::log::warn!("Failed to load student1 config: {}", e),
-        }
-
-        // Load student2 config
-        let student2_path = get_role_config_path(self.dataflow_path.as_ref(), "student2");
-        match RoleConfig::load(&student2_path) {
-            Ok(config) => {
-                self.populate_role_dropdown(cx, "student2", &config.models, &config.default_model);
-                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container.student2_prompt_scroll.student2_prompt_wrapper.student2_prompt_input))
-                    .set_text(cx, &config.system_prompt);
-                self.student2_config = config;
-                ::log::info!("Loaded student2 config");
-            }
-            Err(e) => ::log::warn!("Failed to load student2 config: {}", e),
-        }
-
-        // Load tutor config
-        let tutor_path = get_role_config_path(self.dataflow_path.as_ref(), "tutor");
-        match RoleConfig::load(&tutor_path) {
-            Ok(config) => {
-                self.populate_role_dropdown(cx, "tutor", &config.models, &config.default_model);
-                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container.tutor_prompt_scroll.tutor_prompt_wrapper.tutor_prompt_input))
-                    .set_text(cx, &config.system_prompt);
-                self.tutor_config = config;
-                ::log::info!("Loaded tutor config");
-            }
-            Err(e) => ::log::warn!("Failed to load tutor config: {}", e),
-        }
-
-        self.role_configs_loaded = true;
     }
 
     /// Populate a role's model dropdown with models and select the default
@@ -639,6 +674,25 @@ impl MoFaFMScreen {
             .unwrap_or(0);
 
         dropdown.set_labels(cx, models.to_vec());
+        dropdown.set_selected_item(cx, selected_idx);
+    }
+
+    /// Populate a role's voice dropdown and select the current voice
+    fn populate_voice_dropdown(&mut self, cx: &mut Cx, role: &str, selected_voice: &str) {
+        let dropdown_id = match role {
+            "student1" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row.student1_voice_dropdown),
+            "student2" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row.student2_voice_dropdown),
+            "tutor" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row.tutor_voice_dropdown),
+            _ => return,
+        };
+
+        let dropdown = self.view.drop_down(dropdown_id);
+
+        // Find selected index
+        let selected_idx = VOICE_OPTIONS.iter()
+            .position(|&v| v == selected_voice)
+            .unwrap_or(0);
+
         dropdown.set_selected_item(cx, selected_idx);
     }
 
@@ -678,6 +732,20 @@ impl MoFaFMScreen {
             config.default_model = config.models[selected_idx].clone();
         }
 
+        // Get selected voice from dropdown
+        let voice_dropdown_id = match role {
+            "student1" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row.student1_voice_dropdown),
+            "student2" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row.student2_voice_dropdown),
+            "tutor" => ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row.tutor_voice_dropdown),
+            _ => return,
+        };
+
+        let voice_dropdown = self.view.drop_down(voice_dropdown_id);
+        let voice_idx = voice_dropdown.selected_item();
+        if voice_idx < VOICE_OPTIONS.len() {
+            config.voice = VOICE_OPTIONS[voice_idx].to_string();
+        }
+
         // Save to file
         match config.save() {
             Ok(_) => ::log::info!("Saved {} config", role),
@@ -687,8 +755,63 @@ impl MoFaFMScreen {
         self.view.redraw(cx);
     }
 
+    /// Lazy populate a TextInput only when user first interacts with it
+    fn lazy_populate_editor(&mut self, cx: &mut Cx, editor: &str) {
+        match editor {
+            "context" if !self.context_ui_populated && !self.context_content.is_empty() => {
+                let content = self.context_content.clone();
+                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container.context_input_scroll.context_input_wrapper.context_input))
+                    .set_text(cx, &content);
+                self.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_status))
+                    .set_text(cx, "Loaded");
+                self.context_ui_populated = true;
+                ::log::info!("Lazy loaded context UI ({} bytes)", content.len());
+            }
+            "student1" if !self.student1_ui_populated && !self.student1_config.system_prompt.is_empty() => {
+                let models = self.student1_config.models.clone();
+                let default_model = self.student1_config.default_model.clone();
+                let voice = self.student1_config.voice.clone();
+                let prompt = self.student1_config.system_prompt.clone();
+                self.populate_role_dropdown(cx, "student1", &models, &default_model);
+                self.populate_voice_dropdown(cx, "student1", &voice);
+                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container.student1_prompt_scroll.student1_prompt_wrapper.student1_prompt_input))
+                    .set_text(cx, &prompt);
+                self.student1_ui_populated = true;
+                ::log::info!("Lazy loaded student1 UI");
+            }
+            "student2" if !self.student2_ui_populated && !self.student2_config.system_prompt.is_empty() => {
+                let models = self.student2_config.models.clone();
+                let default_model = self.student2_config.default_model.clone();
+                let voice = self.student2_config.voice.clone();
+                let prompt = self.student2_config.system_prompt.clone();
+                self.populate_role_dropdown(cx, "student2", &models, &default_model);
+                self.populate_voice_dropdown(cx, "student2", &voice);
+                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container.student2_prompt_scroll.student2_prompt_wrapper.student2_prompt_input))
+                    .set_text(cx, &prompt);
+                self.student2_ui_populated = true;
+                ::log::info!("Lazy loaded student2 UI");
+            }
+            "tutor" if !self.tutor_ui_populated && !self.tutor_config.system_prompt.is_empty() => {
+                let models = self.tutor_config.models.clone();
+                let default_model = self.tutor_config.default_model.clone();
+                let voice = self.tutor_config.voice.clone();
+                let prompt = self.tutor_config.system_prompt.clone();
+                self.populate_role_dropdown(cx, "tutor", &models, &default_model);
+                self.populate_voice_dropdown(cx, "tutor", &voice);
+                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container.tutor_prompt_scroll.tutor_prompt_wrapper.tutor_prompt_input))
+                    .set_text(cx, &prompt);
+                self.tutor_ui_populated = true;
+                ::log::info!("Lazy loaded tutor UI");
+            }
+            _ => {}
+        }
+    }
+
     /// Toggle maximize state for an editor - takes over entire mofa-fm page
     fn toggle_maximize(&mut self, cx: &mut Cx, editor: &str) {
+        // Lazy populate TextInput on first interaction
+        self.lazy_populate_editor(cx, editor);
+
         let is_currently_maximized = self.maximized_editor.as_deref() == Some(editor);
 
         if is_currently_maximized {
@@ -725,11 +848,15 @@ impl MoFaFMScreen {
                 .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_model_row))
                 .set_visible(cx, true);
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row))
+                .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_save_row))
                 .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_label))
                 .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_model_row))
+                .set_visible(cx, true);
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row))
                 .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_save_row))
                 .set_visible(cx, true);
@@ -737,27 +864,37 @@ impl MoFaFMScreen {
                 .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_model_row))
                 .set_visible(cx, true);
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row))
+                .set_visible(cx, true);
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_save_row))
                 .set_visible(cx, true);
 
-            // Reset all editor container heights to normal
+            // Reset all editor container heights to normal and disable horizontal scroll
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container))
                 .apply_over(cx, live!{ height: 200 });
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container.context_input_scroll))
+                .apply_over(cx, live!{ scroll_bars: { show_scroll_x: false } });
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container))
                 .apply_over(cx, live!{ height: 120 });
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container.student1_prompt_scroll))
+                .apply_over(cx, live!{ scroll_bars: { show_scroll_x: false } });
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container))
                 .apply_over(cx, live!{ height: 120 });
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container.student2_prompt_scroll))
+                .apply_over(cx, live!{ scroll_bars: { show_scroll_x: false } });
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container))
                 .apply_over(cx, live!{ height: 120 });
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container.tutor_prompt_scroll))
+                .apply_over(cx, live!{ scroll_bars: { show_scroll_x: false } });
 
-            // Update all maximize buttons to show expand icon
+            // Update all maximize buttons to show expand icon (maximized: 0.0)
             self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_maximize_btn))
                 .apply_over(cx, live!{ draw_bg: { maximized: 0.0 } });
-            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_header.student1_maximize_btn))
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_header.student1_maximize_btn))
                 .apply_over(cx, live!{ draw_bg: { maximized: 0.0 } });
-            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_header.student2_maximize_btn))
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_header.student2_maximize_btn))
                 .apply_over(cx, live!{ draw_bg: { maximized: 0.0 } });
-            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_header.tutor_maximize_btn))
+            self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_header.tutor_maximize_btn))
                 .apply_over(cx, live!{ draw_bg: { maximized: 0.0 } });
         } else {
             // Maximize: hide everything except the editor, take over entire page
@@ -798,12 +935,16 @@ impl MoFaFMScreen {
                     .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_model_row))
                     .set_visible(cx, false);
+                self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row))
+                    .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_save_row))
                     .set_visible(cx, false);
             } else if show_student2 {
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_label))
                     .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_model_row))
+                    .set_visible(cx, false);
+                self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row))
                     .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_save_row))
                     .set_visible(cx, false);
@@ -812,34 +953,44 @@ impl MoFaFMScreen {
                     .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_model_row))
                     .set_visible(cx, false);
+                self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row))
+                    .set_visible(cx, false);
                 self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_save_row))
                     .set_visible(cx, false);
             }
 
-            // Expand the editor container to fill most of the screen
+            // Expand the editor container to fill most of the screen and enable horizontal scroll
             match editor {
                 "context" => {
                     self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container))
                         .apply_over(cx, live!{ height: 800 });
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container.context_input_scroll))
+                        .apply_over(cx, live!{ scroll_bars: { show_scroll_x: true } });
                     self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_maximize_btn))
                         .apply_over(cx, live!{ draw_bg: { maximized: 1.0 } });
                 }
                 "student1" => {
                     self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container))
                         .apply_over(cx, live!{ height: 800 });
-                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_header.student1_maximize_btn))
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_container.student1_prompt_scroll))
+                        .apply_over(cx, live!{ scroll_bars: { show_scroll_x: true } });
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_header.student1_maximize_btn))
                         .apply_over(cx, live!{ draw_bg: { maximized: 1.0 } });
                 }
                 "student2" => {
                     self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container))
                         .apply_over(cx, live!{ height: 800 });
-                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_header.student2_maximize_btn))
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_container.student2_prompt_scroll))
+                        .apply_over(cx, live!{ scroll_bars: { show_scroll_x: true } });
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_header.student2_maximize_btn))
                         .apply_over(cx, live!{ draw_bg: { maximized: 1.0 } });
                 }
                 "tutor" => {
                     self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container))
                         .apply_over(cx, live!{ height: 800 });
-                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_header.tutor_maximize_btn))
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container.tutor_prompt_scroll))
+                        .apply_over(cx, live!{ scroll_bars: { show_scroll_x: true } });
+                    self.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_header.tutor_maximize_btn))
                         .apply_over(cx, live!{ draw_bg: { maximized: 1.0 } });
                 }
                 _ => {}
@@ -849,27 +1000,78 @@ impl MoFaFMScreen {
         self.view.redraw(cx);
     }
 
-    /// Load study-context.md into the context editor
-    fn load_context(&mut self, cx: &mut Cx) {
+    /// Start async preloading in a background thread
+    fn start_async_preload(&mut self) {
+        // Compute paths upfront (on main thread)
         let context_path = self.get_context_path();
-        match std::fs::read_to_string(&context_path) {
-            Ok(content) => {
-                self.context_content = content.clone();
-                self.context_loaded = true;
-                // Set the TextInput text
-                self.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container.context_input_scroll.context_input_wrapper.context_input))
-                    .set_text(cx, &content);
-                // Update status to "Loaded"
-                self.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_status))
-                    .set_text(cx, "Loaded");
-                ::log::info!("Loaded study-context.md ({} bytes)", content.len());
+        let student1_path = get_role_config_path(self.dataflow_path.as_ref(), "student1");
+        let student2_path = get_role_config_path(self.dataflow_path.as_ref(), "student2");
+        let tutor_path = get_role_config_path(self.dataflow_path.as_ref(), "tutor");
+
+        // Create shared state for background thread
+        let preload = Arc::new(Mutex::new(PreloadedData::default()));
+        self.async_preload = Some(preload.clone());
+
+        // Spawn background thread for file I/O
+        std::thread::spawn(move || {
+            let mut data = PreloadedData::default();
+
+            // Load context file
+            if let Ok(content) = std::fs::read_to_string(&context_path) {
+                ::log::info!("Async preloaded study-context.md ({} bytes)", content.len());
+                data.context_content = Some(content);
             }
-            Err(e) => {
-                ::log::warn!("Failed to load study-context.md: {}", e);
-                // Update status to show error
-                self.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_status))
-                    .set_text(cx, "Not found");
+
+            // Load role configs
+            if let Ok(config) = RoleConfig::load(&student1_path) {
+                ::log::info!("Async preloaded student1 config");
+                data.student1_config = Some(config);
             }
+            if let Ok(config) = RoleConfig::load(&student2_path) {
+                ::log::info!("Async preloaded student2 config");
+                data.student2_config = Some(config);
+            }
+            if let Ok(config) = RoleConfig::load(&tutor_path) {
+                ::log::info!("Async preloaded tutor config");
+                data.tutor_config = Some(config);
+            }
+
+            data.loading_complete = true;
+
+            // Store results in shared state
+            if let Ok(mut shared) = preload.lock() {
+                *shared = data;
+            }
+        });
+    }
+
+    /// Preload all configs into memory at startup (no UI updates) - DEPRECATED, use start_async_preload
+    #[allow(dead_code)]
+    fn preload_configs(&mut self) {
+        // Preload context file
+        let context_path = self.get_context_path();
+        if let Ok(content) = std::fs::read_to_string(&context_path) {
+            ::log::info!("Preloaded study-context.md ({} bytes)", content.len());
+            self.context_content = content;
+        }
+
+        // Preload role configs
+        let student1_path = get_role_config_path(self.dataflow_path.as_ref(), "student1");
+        if let Ok(config) = RoleConfig::load(&student1_path) {
+            ::log::info!("Preloaded student1 config");
+            self.student1_config = config;
+        }
+
+        let student2_path = get_role_config_path(self.dataflow_path.as_ref(), "student2");
+        if let Ok(config) = RoleConfig::load(&student2_path) {
+            ::log::info!("Preloaded student2 config");
+            self.student2_config = config;
+        }
+
+        let tutor_path = get_role_config_path(self.dataflow_path.as_ref(), "tutor");
+        if let Ok(config) = RoleConfig::load(&tutor_path) {
+            ::log::info!("Preloaded tutor config");
+            self.tutor_config = config;
         }
     }
 
@@ -1028,7 +1230,7 @@ impl StateChangeListener for MoFaFMScreenRef {
                 draw_bg: { dark_mode: (dark_mode) }
             });
             // Apply dark mode to mic icon
-            inner.view.icon(ids!(left_column.running_tab_content.audio_container.mic_container.mic_group.mic_mute_btn.mic_icon_on.icon)).apply_over(cx, live!{
+            inner.view.view(ids!(left_column.running_tab_content.audio_container.mic_container.mic_group.mic_mute_btn.mic_icon_on.icon)).apply_over(cx, live!{
                 draw_icon: { dark_mode: (dark_mode) }
             });
             inner.view.view(ids!(left_column.running_tab_content.audio_container.aec_container)).apply_over(cx, live!{
@@ -1102,6 +1304,17 @@ impl StateChangeListener for MoFaFMScreenRef {
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_model_row.student1_model_label)).apply_over(cx, live!{
                 draw_text: { dark_mode: (dark_mode) }
             });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_model_row.student1_model_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row.student1_voice_label)).apply_over(cx, live!{
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_voice_row.student1_voice_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+                draw_text: { dark_mode: (dark_mode) }
+            });
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_prompt_label)).apply_over(cx, live!{
                 draw_text: { dark_mode: (dark_mode) }
             });
@@ -1112,6 +1325,9 @@ impl StateChangeListener for MoFaFMScreenRef {
                 draw_text: { dark_mode: (dark_mode) }
                 draw_cursor: { dark_mode: (dark_mode) }
             });
+            inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student1_config.student1_header.student1_maximize_btn)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+            });
             // Role section - student2 config
             inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config)).apply_over(cx, live!{
                 draw_bg: { dark_mode: (dark_mode) }
@@ -1120,6 +1336,17 @@ impl StateChangeListener for MoFaFMScreenRef {
                 draw_text: { dark_mode: (dark_mode) }
             });
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_model_row.student2_model_label)).apply_over(cx, live!{
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_model_row.student2_model_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row.student2_voice_label)).apply_over(cx, live!{
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_voice_row.student2_voice_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
                 draw_text: { dark_mode: (dark_mode) }
             });
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_prompt_label)).apply_over(cx, live!{
@@ -1132,6 +1359,9 @@ impl StateChangeListener for MoFaFMScreenRef {
                 draw_text: { dark_mode: (dark_mode) }
                 draw_cursor: { dark_mode: (dark_mode) }
             });
+            inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.student2_config.student2_header.student2_maximize_btn)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+            });
             // Role section - tutor config
             inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config)).apply_over(cx, live!{
                 draw_bg: { dark_mode: (dark_mode) }
@@ -1140,6 +1370,17 @@ impl StateChangeListener for MoFaFMScreenRef {
                 draw_text: { dark_mode: (dark_mode) }
             });
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_model_row.tutor_model_label)).apply_over(cx, live!{
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_model_row.tutor_model_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row.tutor_voice_label)).apply_over(cx, live!{
+                draw_text: { dark_mode: (dark_mode) }
+            });
+            inner.view.drop_down(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_voice_row.tutor_voice_dropdown)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
                 draw_text: { dark_mode: (dark_mode) }
             });
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_label)).apply_over(cx, live!{
@@ -1151,6 +1392,9 @@ impl StateChangeListener for MoFaFMScreenRef {
             inner.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_prompt_container.tutor_prompt_scroll.tutor_prompt_wrapper.tutor_prompt_input)).apply_over(cx, live!{
                 draw_text: { dark_mode: (dark_mode) }
                 draw_cursor: { dark_mode: (dark_mode) }
+            });
+            inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.tutor_config.tutor_header.tutor_maximize_btn)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
             });
             // Role section - shared context
             inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section)).apply_over(cx, live!{
@@ -1165,6 +1409,9 @@ impl StateChangeListener for MoFaFMScreenRef {
             inner.view.text_input(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_input_container.context_input_scroll.context_input_wrapper.context_input)).apply_over(cx, live!{
                 draw_text: { dark_mode: (dark_mode) }
                 draw_cursor: { dark_mode: (dark_mode) }
+            });
+            inner.view.view(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.role_section.context_section.context_header.context_maximize_btn)).apply_over(cx, live!{
+                draw_bg: { dark_mode: (dark_mode) }
             });
             // Audio section labels
             inner.view.label(ids!(left_column.settings_tab_content.settings_panel.settings_scroll.settings_content.audio_section.audio_section_title)).apply_over(cx, live!{

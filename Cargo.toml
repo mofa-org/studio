@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "mofa-studio-shell",
-    "mofa-widgets",
-    "mofa-dora-bridge",
-    "apps/*",
-]
+members = ["mofa-studio-shell", "mofa-widgets", "mofa-dora-bridge", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"

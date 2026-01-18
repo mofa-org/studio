@@ -1,18 +1,16 @@
 [project]
 name = "dora-speechmonitor"
 version = "0.1.0"
-authors = [
-    {name = "Dora Contributors"},
-]
+authors = [{ name = "Dora Contributors" }]
 description = "Real-time speech monitoring node with Silero VAD for Dora"
 readme = "README.md"
 
 dependencies = [
-    "dora-rs>=0.3.7",
-    "numpy>=1.21.0,<2.0",  # CRITICAL: Must be 1.x (1.26.4 recommended)
-    "scipy>=1.11.0",  # Updated to support newer versions
+    "dora-rs==0.3.12",
+    "numpy>=1.21.0,<2.0", # CRITICAL: Must be 1.x (1.26.4 recommended)
+    "scipy>=1.11.0",      # Updated to support newer versions
     "pyarrow>=10.0.0",
-    "torch>=2.0.0",  # Updated to support PyTorch 2.6+ (transformers security fix)
+    "torch>=2.0.0",       # Updated to support PyTorch 2.6+ (transformers security fix)
     "torchaudio>=2.0.0",  # Match torch version range
     "silero-vad>=5.1",
 ]

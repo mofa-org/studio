@@ -46,6 +46,7 @@ send_status(node, "error", details={"error": "Connection failed"})
 Send log message through the `log` output channel.
 
 **Parameters:**
+
 - `node`: Dora node instance
 - `level`: Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
 - `message`: Log message string
@@ -57,6 +58,7 @@ Send log message through the `log` output channel.
 Send status message through the `status` output channel.
 
 **Parameters:**
+
 - `node`: Dora node instance
 - `status`: Status string
 - `details`: Optional dict with additional status details
@@ -67,6 +69,7 @@ Send status message through the `status` output channel.
 Get log level from environment variable.
 
 **Parameters:**
+
 - `env_var`: Environment variable name (default: `LOG_LEVEL`)
 - `default`: Default log level if env var not set (default: `INFO`)
 
@@ -74,14 +77,14 @@ Get log level from environment variable.
 
 ## Log Levels
 
-| Level   | Value | Description |
-|---------|-------|-------------|
+| Level   | Value | Description                |
+| ------- | ----- | -------------------------- |
 | DEBUG   | 10    | Detailed debug information |
-| INFO    | 20    | General information |
-| WARNING | 30    | Warning messages |
-| ERROR   | 40    | Error messages |
+| INFO    | 20    | General information        |
+| WARNING | 30    | Warning messages           |
+| ERROR   | 40    | Error messages             |
 
 ## Dependencies
 
-- `dora-rs>=0.3.7`
+- `dora-rs==0.3.12`
 - `pyarrow>=10.0.0`

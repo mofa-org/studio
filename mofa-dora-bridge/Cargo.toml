@@ -7,7 +7,7 @@ description = "Modular Dora bridge for MoFA widgets - each widget connects as se
 
 [dependencies]
 # Dora
-dora-node-api.workspace = true
+dora-node-api = { git = "https://github.com/dora-rs/dora.git", tag = "v0.3.12" }
 
 # Async runtime
 tokio.workspace = true

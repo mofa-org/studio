@@ -132,7 +132,7 @@ impl MoFaDebateScreen {
             let mut assistant_messages: Vec<ChatMessageEntry> = messages
                 .into_iter()
                 .map(|m| ChatMessageEntry {
-                    sender: m.sender,
+                    sender: Self::map_debate_speaker(&m.sender),
                     content: m.content,
                     timestamp: m.timestamp,
                     is_streaming: m.is_streaming,
@@ -164,7 +164,8 @@ impl MoFaDebateScreen {
             // Only process entries we haven't seen yet
             for entry in entries.into_iter().skip(self.processed_dora_log_count) {
                 let level_str = format!("{:?}", entry.level).to_uppercase();
-                let log_line = format!("[{}] [{}] {}", level_str, entry.node_id, entry.message);
+                let display_node = Self::format_node_name(&entry.node_id);
+                let log_line = format!("[{}] [{}] {}", level_str, display_node, entry.message);
                 self.add_log(cx, &log_line);
                 self.processed_dora_log_count += 1;
             }
@@ -378,6 +379,7 @@ impl MoFaDebateScreen {
     pub(super) fn format_bridge_name(node_id: &str) -> String {
         // Remove "mofa-" prefix if present
         let name = node_id.strip_prefix("mofa-").unwrap_or(node_id);
+        let name = Self::format_node_name(name);
 
         // Convert kebab-case to Title Case
         name.split('-')
@@ -390,6 +392,43 @@ impl MoFaDebateScreen {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// Map debate participants to user-facing labels in logs.
+    pub(super) fn format_node_name(node_id: &str) -> String {
+        Self::map_debate_roles(node_id)
+    }
+
+    /// Replace internal debate role ids with UI-friendly labels.
+    pub(super) fn map_debate_roles(text: &str) -> String {
+        let mut out = text.to_string();
+        for (from, to) in [
+            ("Student 1", "Affirmative"),
+            ("Student1", "Affirmative"),
+            ("student 1", "Affirmative"),
+            ("student1", "Affirmative"),
+            ("Student 2", "Negative"),
+            ("Student2", "Negative"),
+            ("student 2", "Negative"),
+            ("student2", "Negative"),
+            ("Tutor", "Judge"),
+            ("tutor", "Judge"),
+        ] {
+            out = out.replace(from, to);
+        }
+        out
+    }
+
+    /// Map speaker labels for chat headers without mutating message content.
+    pub(super) fn map_debate_speaker(name: &str) -> String {
+        let normalized = name.to_lowercase().replace(' ', "");
+        let mapped = match normalized.as_str() {
+            "student1" => "Affirmative",
+            "student2" => "Negative",
+            "tutor" => "Judge",
+            _ => name,
+        };
+        mapped.to_string()
     }
 
     // =====================================================
@@ -482,7 +521,7 @@ impl MoFaDebateScreen {
 
         let mut kickoff_sent = false;
         let kickoff_prompt = format!(
-            "Start a formal debate. Roles: Student1 = PRO, Student2 = CON, Tutor = Judge/Moderator. Debate topic: {}. Keep turns concise and alternate speakers. Tutor manages order and summarizes at the end.",
+            "Start a formal debate. Roles: Affirmative = PRO, Negative = CON, Judge = Moderator. Debate topic: {}. Keep turns concise and alternate speakers. Judge manages order and summarizes at the end.",
             kickoff_topic
         );
 

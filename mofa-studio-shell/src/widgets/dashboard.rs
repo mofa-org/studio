@@ -41,6 +41,8 @@ live_design! {
     use mofa_fm::screen::design::MoFaFMScreen;
     use mofa_settings::screen::SettingsScreen;
     use mofa_debate::screen::design::MoFaDebateScreen;
+    use mofa_hello::screen::HelloScreen;
+    use mofa_rss_newscaster::screen::RSSNewscasterScreen;
     use crate::widgets::tabs::TabWidget;
     use crate::widgets::tabs::TabBar;
 
@@ -282,6 +284,16 @@ live_design! {
                                     text_style: <FONT_REGULAR>{ font_size: 13.0 }
                                 }
                             }
+                        }
+
+                        hello_page = <HelloScreen> {
+                            width: Fill, height: Fill
+                            visible: false
+                        }
+
+                        rss_newscaster_page = <RSSNewscasterScreen> {
+                            width: Fill, height: Fill
+                            visible: false
                         }
 
                         settings_page = <SettingsScreen> {

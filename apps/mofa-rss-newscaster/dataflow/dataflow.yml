@@ -1,0 +1,44 @@
+nodes:
+  # RSS Fetcher - fetches and parses RSS feed from URL
+  - id: rss-fetcher
+    build: pip install -e ../agents/rss-fetcher
+    path: rss-fetcher
+    inputs:
+      rss_url: mofa-prompt-input/control
+    outputs:
+      - rss_feed
+
+  # RSS Headline Scripter - lightweight scripts from feed entries
+  - id: rss-headline-scripter
+    build: pip install -e ../agents/rss-headline-scripter
+    path: rss-headline-scripter
+    inputs:
+      rss_feed: rss-fetcher/rss_feed
+    outputs:
+      - news_scripts
+
+  # Anchor Assigner - assigns scripts to male/female anchors
+  - id: anchor-assigner
+    build: pip install -e ../agents/anchor-assigner
+    path: anchor-assigner
+    inputs:
+      news_scripts: rss-headline-scripter/news_scripts
+    outputs:
+      - anchor_pairs
+    env:
+      IS_DATAFLOW_END: true
+      WRITE_LOG: true
+      MALE_ANCHOR_NAME: 张明
+      FEMALE_ANCHOR_NAME: 李华
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_MODEL: gpt-4o-mini
+
+  # MoFA Prompt Input - UI input + results relay
+  - id: mofa-prompt-input
+    path: dynamic
+    inputs:
+      text:
+        source: anchor-assigner/anchor_pairs
+        queue_size: 1000
+    outputs:
+      - control

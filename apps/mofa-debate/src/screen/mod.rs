@@ -848,6 +848,56 @@ impl StateChangeListener for MoFaDebateScreenRef {
                 ))
                 .update_dark_mode(cx, dark_mode);
 
+            // Apply dark mode to participant icons
+            inner
+                .view
+                .icon(ids!(
+                    left_column
+                        .participant_container
+                        .participant_bar
+                        .student1_panel
+                        .header
+                        .icon
+                ))
+                .apply_over(
+                    cx,
+                    live! {
+                        draw_icon: { dark_mode: (dark_mode) }
+                    },
+                );
+            inner
+                .view
+                .icon(ids!(
+                    left_column
+                        .participant_container
+                        .participant_bar
+                        .student2_panel
+                        .header
+                        .icon
+                ))
+                .apply_over(
+                    cx,
+                    live! {
+                        draw_icon: { dark_mode: (dark_mode) }
+                    },
+                );
+            inner
+                .view
+                .icon(ids!(
+                    left_column
+                        .participant_container
+                        .participant_bar
+                        .tutor_panel
+                        .header
+                        .icon
+                ))
+                .apply_over(
+                    cx,
+                    live! {
+                        draw_icon: { dark_mode: (dark_mode) }
+                    },
+                );
+
             // Apply dark mode to prompt section
             inner
                 .view

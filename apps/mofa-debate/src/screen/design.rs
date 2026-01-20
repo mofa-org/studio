@@ -91,7 +91,19 @@ live_design! {
                         flow: Right
                         tutor_panel = <ParticipantPanel> {
                             width: Fill, height: Fit
-                            header = { name_label = { text: "Tutor · Moderator" } }
+                            header = {
+                                name_label = { text: "Judge · 裁判" }
+                                icon = <Icon> {
+                                    draw_icon: {
+                                        instance dark_mode: 0.0
+                                        svg_file: dep("crate://self/resources/icons/gavel.svg")
+                                        fn get_color(self) -> vec4 {
+                                            return mix((SLATE_600), (SLATE_400), self.dark_mode);
+                                        }
+                                    }
+                                    icon_walk: {width: 16, height: 16, margin: {left: 4}}
+                                }
+                            }
                         }
                     }
 
@@ -102,11 +114,35 @@ live_design! {
 
                         student1_panel = <ParticipantPanel> {
                             width: Fill, height: Fit
-                            header = { name_label = { text: "Student 1 · PRO" } }
+                            header = {
+                                name_label = { text: "Affirmative · 正方" }
+                                icon = <Icon> {
+                                    draw_icon: {
+                                        instance dark_mode: 0.0
+                                        svg_file: dep("crate://self/resources/icons/affirmative.svg")
+                                        fn get_color(self) -> vec4 {
+                                            return mix((ACCENT_BLUE), (BLUE_400), self.dark_mode);
+                                        }
+                                    }
+                                    icon_walk: {width: 16, height: 16, margin: {left: 4}}
+                                }
+                            }
                         }
                         student2_panel = <ParticipantPanel> {
                             width: Fill, height: Fit
-                            header = { name_label = { text: "Student 2 · CON" } }
+                            header = {
+                                name_label = { text: "Negative · 反方" }
+                                icon = <Icon> {
+                                    draw_icon: {
+                                        instance dark_mode: 0.0
+                                        svg_file: dep("crate://self/resources/icons/negative.svg")
+                                        fn get_color(self) -> vec4 {
+                                            return mix((ACCENT_RED), (RED_400), self.dark_mode);
+                                        }
+                                    }
+                                    icon_walk: {width: 16, height: 16, margin: {left: 4}}
+                                }
+                            }
                         }
                     }
                 }

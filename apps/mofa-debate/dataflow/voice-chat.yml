@@ -1,4 +1,4 @@
-# Voice Chat Dataflow - Modular MoFA Integration
+# Debate Dataflow - Modular MoFA Integration
 #
 # Based on examples/conference/dataflow-study-audio-multi.yml
 # Replaces debate-monitor, viewer, and audio-player with MoFA dynamic nodes
@@ -10,9 +10,9 @@
 # - Complete backpressure control
 
 nodes:
-  # ============ Study Participants (MaaS) ============
+  # ============ Debate Participants (MaaS) ============
 
-  - id: student1
+  - id: student1  # Affirmative side (PRO)
     build: cargo build --release --manifest-path ../../../node-hub/dora-maas-client/Cargo.toml
     path: ../../../node-hub/dora-maas-client/target/release/dora-maas-client
     inputs:
@@ -30,7 +30,7 @@ nodes:
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       LOG_LEVEL: INFO
 
-  - id: student2
+  - id: student2  # Negative side (CON)
     build: cargo build --release --manifest-path ../../../node-hub/dora-maas-client/Cargo.toml
     path: ../../../node-hub/dora-maas-client/target/release/dora-maas-client
     inputs:
@@ -48,7 +48,7 @@ nodes:
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       LOG_LEVEL: INFO
 
-  - id: tutor
+  - id: tutor  # Judge / Moderator
     build: cargo build --release --manifest-path ../../../node-hub/dora-maas-client/Cargo.toml
     path: ../../../node-hub/dora-maas-client/target/release/dora-maas-client
     inputs:

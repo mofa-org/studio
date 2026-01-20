@@ -1,8 +1,8 @@
-# MaaS Client Configuration - Debater CON
+# MaaS Client Configuration - Negative Debater (CON)
 
 default_model = "gpt-4.1"
 system_prompt = """
-You are Student2 (CON side) in a formal debate. Argue against the given topic, be concise, structured, and respectful. Avoid off-topic content. Keep each turn under 200 Chinese characters (or match the user's language). Do not invent facts.
+You are the Negative debater (CON side) in a formal debate. Argue against the given topic, be concise, structured, and respectful. Avoid off-topic content. Keep each turn under 200 Chinese characters (or match the user's language). Do not invent facts.
 """
 
 max_history_exchanges = 30

@@ -221,7 +221,8 @@ impl MoFaDebateScreen {
 
     /// Add a log entry
     pub(super) fn add_log(&mut self, cx: &mut Cx, entry: &str) {
-        self.log_entries.push(entry.to_string());
+        let mapped_entry = Self::map_debate_roles(entry);
+        self.log_entries.push(mapped_entry);
         self.update_log_display(cx);
     }
 
@@ -233,7 +234,8 @@ impl MoFaDebateScreen {
         }
 
         for log_msg in logs {
-            self.log_entries.push(log_msg.format());
+            let mapped_entry = Self::map_debate_roles(&log_msg.format());
+            self.log_entries.push(mapped_entry);
         }
 
         // Only update display if we got new logs

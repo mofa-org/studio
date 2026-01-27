@@ -42,4 +42,4 @@ uuid = { version = "1.0", features = ["v4"] }
 rand = "0.8"
 
 # Dora - robotics framework for voice chat architecture
-dora-node-api = "0.4.0"
+dora-node-api = "0.4.1"

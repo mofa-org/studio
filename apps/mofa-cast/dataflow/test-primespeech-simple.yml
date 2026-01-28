@@ -1,0 +1,43 @@
+# Minimal PrimeSpeech Test Dataflow for mofa-cast
+# 最小化配置，参考mofa-fm成功案例
+
+nodes:
+  # Input: Dynamic node from mofa-studio
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: primespeech-tts/audio
+      segment_complete: primespeech-tts/segment_complete
+      log: primespeech-tts/log
+    outputs:
+      - text
+
+  # TTS: PrimeSpeech (完全复制mofa-fm的配置)
+  - id: primespeech-tts
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+      VOICE_NAME: "Luo Xiang"
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: zh
+      PROMPT_LANG: zh
+      TOP_K: 5
+      TOP_P: 1.0
+      TEMPERATURE: 1.0
+      SPEED_FACTOR: 1.0
+      FRAGMENT_INTERVAL: "0.1"
+      USE_GPU: false
+      NUM_THREADS: 4
+      RETURN_FRAGMENT: "false"
+      LOG_LEVEL: DEBUG
+      ENABLE_INTERNAL_SEGMENTATION: "true"
+      TTS_MAX_SEGMENT_LENGTH: "100"
+      TTS_MIN_SEGMENT_LENGTH: "20"

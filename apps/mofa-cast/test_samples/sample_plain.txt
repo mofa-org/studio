@@ -1,0 +1,14 @@
+host: Hello, how are you today ?
+guest1: I'm doing great! Thanks for asking.
+host: That's wonderful to hear. What have you been working on?
+guest1: I've been learning about AI and machine learning.
+host: That sounds fascinating! Tell me more about it.
+guest1: Well, I've been studying neural networks and how they can learn patterns from data.
+host: That's really interesting. What kind of applications are you building?
+guest1: I'm working on a project that analyzes customer feedback to improve products.
+host: Wow, that could be really useful for businesses. How is it going?
+guest1: Pretty well! The model can already identify common complaints with 85% accuracy.
+host: That's impressive! What's next for your project?
+guest1: I want to add sentiment analysis to understand not just what people are saying, but how they feel.
+host: That would add a whole new dimension to the analysis. Good luck!
+guest1: Thanks! I'm excited to see where it goes.

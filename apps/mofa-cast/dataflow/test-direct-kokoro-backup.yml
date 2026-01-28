@@ -1,0 +1,28 @@
+# Simple test dataflow - bypass text-segmenter
+# Test if Kokoro TTS can process multiple inputs directly
+
+nodes:
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: kokoro-tts/audio
+      segment_complete: kokoro-tts/segment_complete
+      log: kokoro-tts/log
+    outputs:
+      - text
+
+  - id: kokoro-tts
+    build: pip install -e ../../../node-hub/dora-kokoro-tts
+    path: dora-kokoro-tts
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      BACKEND: "mlx"  # Use MLX backend (GPU accelerated, more stable)
+      LANGUAGE: "a"
+      VOICE: "am_michael"
+      SPEED: "1.0"
+      LOG_LEVEL: "INFO"

@@ -1,0 +1,76 @@
+# Batch TTS Dataflow for mofa-cast
+#
+# This dataflow handles batch text-to-speech synthesis using dora-kokoro-tts.
+# Integrates with mofa-studio via dynamic nodes for UI control and audio output.
+#
+# Usage:
+#   dora start dataflow/batch-tts.yml --name mofa-cast-tts
+
+nodes:
+  # ========================================
+  # Input: Dynamic node from mofa-studio
+  # ========================================
+
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: kokoro-tts/audio
+      segment_complete: kokoro-tts/segment_complete
+      log: text-segmenter/log
+      log_tts: kokoro-tts/log
+    outputs:
+      - text
+
+  # ========================================
+  # Processing: Text Segmentation
+  # ========================================
+
+  - id: text-segmenter
+    build: pip install -e ../../../node-hub/dora-text-segmenter
+    path: dora-text-segmenter
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - text_segment
+      - status
+      - metrics
+      - log
+    env:
+      SEGMENTER_MODE: "passthrough"
+      LOG_LEVEL: "INFO"
+
+  # ========================================
+  # TTS: Kokoro Text-to-Speech
+  # ========================================
+
+  - id: kokoro-tts
+    build: pip install -e ../../../node-hub/dora-kokoro-tts
+    path: /Users/loubicheng/miniconda3/envs/mofa-studio/bin/dora-kokoro-tts
+    inputs:
+      text: text-segmenter/text_segment
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      # Backend selection: auto, mlx, cpu
+      # Using CPU backend to avoid MLX model download issues
+      BACKEND: "cpu"
+      # Language: a=Amercian English, b=British English, z=Mandarin Chinese
+      # Note: Kokoro CPU backend uses single-character codes
+      LANGUAGE: "a"
+      # Voice: af_heart, bf_alice, etc.
+      VOICE: "af_heart"
+      # Speed: 0.5 - 2.0
+      SPEED: "1.0"
+      LOG_LEVEL: "INFO"
+
+  # ========================================
+  # Logging: System log viewer
+  # ========================================
+
+  - id: mofa-system-log
+    path: dynamic
+    inputs:
+      log_input: text-segmenter/log
+      log_tts: kokoro-tts/log

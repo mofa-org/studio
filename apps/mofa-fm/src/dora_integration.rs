@@ -7,6 +7,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use mofa_dora_bridge::{
     controller::DataflowController, dispatcher::DynamicNodeDispatcher, SharedDoraState,
 };
+use crate::dora_process_manager::DoraProcessManager;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -68,6 +69,8 @@ pub struct DoraIntegration {
     worker_handle: Option<thread::JoinHandle<()>>,
     /// Stop signal
     stop_tx: Option<Sender<()>>,
+    /// Dora process manager
+    process_manager: Arc<std::sync::Mutex<DoraProcessManager>>,
 }
 
 impl DoraIntegration {
@@ -84,6 +87,10 @@ impl DoraIntegration {
         let shared_dora_state = SharedDoraState::new();
         let shared_dora_state_clone = Arc::clone(&shared_dora_state);
 
+        // Create process manager
+        let process_manager = Arc::new(std::sync::Mutex::new(DoraProcessManager::new()));
+        let process_manager_clone = Arc::clone(&process_manager);
+
         // Spawn worker thread
         let handle = thread::spawn(move || {
             Self::run_worker(
@@ -92,6 +99,7 @@ impl DoraIntegration {
                 command_rx,
                 event_tx,
                 stop_rx,
+                process_manager_clone,
             );
         });
 
@@ -102,6 +110,7 @@ impl DoraIntegration {
             event_rx,
             worker_handle: Some(handle),
             stop_tx: Some(stop_tx),
+            process_manager,
         }
     }
 
@@ -204,8 +213,19 @@ impl DoraIntegration {
         command_rx: Receiver<DoraCommand>,
         event_tx: Sender<DoraEvent>,
         stop_rx: Receiver<()>,
+        process_manager: Arc<std::sync::Mutex<DoraProcessManager>>,
     ) {
         log::info!("Dora integration worker started");
+
+        // Start dora processes automatically
+        log::info!("Starting dora daemon and coordinator...");
+        if let Err(e) = process_manager.lock().unwrap().start() {
+            log::error!("Failed to start dora processes: {}", e);
+            let _ = event_tx.send(DoraEvent::Error {
+                message: format!("Failed to start dora: {}", e),
+            });
+            return;
+        }
 
         let mut dispatcher: Option<DynamicNodeDispatcher> = None;
         let shared_state_for_dispatcher = shared_dora_state;
@@ -229,6 +249,18 @@ impl DoraIntegration {
                         env_vars,
                     } => {
                         log::info!("Starting dataflow: {:?}", dataflow_path);
+
+                        // Ensure dora processes are running
+                        if !process_manager.lock().unwrap().is_running() {
+                            log::warn!("Dora processes not running, restarting...");
+                            if let Err(e) = process_manager.lock().unwrap().start() {
+                                log::error!("Failed to restart dora processes: {}", e);
+                                let _ = event_tx.send(DoraEvent::Error {
+                                    message: format!("Failed to restart dora: {}", e),
+                                });
+                                continue;
+                            }
+                        }
 
                         // Set environment variables in both process env and controller
                         for (key, value) in &env_vars {
@@ -456,6 +488,10 @@ impl DoraIntegration {
             let _ = disp.stop();
         }
 
+        // Stop dora processes
+        log::info!("Stopping dora daemon and coordinator...");
+        process_manager.lock().unwrap().stop();
+
         log::info!("Dora integration worker stopped");
     }
 }
@@ -471,6 +507,10 @@ impl Drop for DoraIntegration {
         if let Some(handle) = self.worker_handle.take() {
             let _ = handle.join();
         }
+
+        // Stop dora processes as final cleanup
+        log::info!("Drop: Stopping dora processes...");
+        self.process_manager.lock().unwrap().stop();
     }
 }
 

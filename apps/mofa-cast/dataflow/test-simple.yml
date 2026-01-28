@@ -1,0 +1,27 @@
+# Simple TTS Test Dataflow
+# Minimal configuration to test kokoro-tts directly
+
+nodes:
+  # Input: Dynamic node from mofa-studio
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: kokoro-tts/audio
+    outputs:
+      - text
+
+  # TTS: Kokoro Text-to-Speech
+  - id: kokoro-tts
+    build: pip install -e ../../../node-hub/dora-kokoro-tts
+    path: /Users/loubicheng/miniconda3/envs/mofa-studio/bin/dora-kokoro-tts
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - audio
+      - log
+    env:
+      BACKEND: "auto"
+      LANGUAGE: "en"
+      VOICE: "af_heart"
+      SPEED: "1.0"
+      LOG_LEVEL: "DEBUG"

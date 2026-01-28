@@ -96,10 +96,11 @@ def detect_backend():
 class KokoroMLXBackend:
     """MLX-accelerated Kokoro backend using mlx-audio."""
 
-    def __init__(self, model_path=None):
+    def __init__(self, model_path=None, node=None):
         from mlx_audio.tts.generate import generate_audio
 
         self.generate_audio = generate_audio
+        self.node = node
 
         # Store the model path - can be HF repo ID or local path
         # generate_audio() will handle downloading/loading internally
@@ -125,9 +126,10 @@ class KokoroMLXBackend:
 
             with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
                 # Generate audio - use the resolved model path
+                # Note: MLX Audio API uses 'model' parameter (not 'model_path')
                 self.generate_audio(
                     text=text,
-                    model_path=self.model_path,
+                    model=self.model_path,
                     voice=voice,
                     speed=speed,
                     lang_code=lang_code,
@@ -183,41 +185,92 @@ class KokoroMLXBackend:
 class KokoroCPUBackend:
     """CPU-based Kokoro backend using kokoro package."""
 
-    def __init__(self, model_path=None):
+    def __init__(self, model_path=None, node=None):
         from kokoro import KPipeline
         self.KPipeline = KPipeline
         self.model_path = model_path or KOKORO_MODEL_CPU
         self.pipeline = None
         self.current_lang = None
         self.backend_name = "cpu"
+        self.node = node
 
     def synthesize(self, text, voice, speed, lang_code):
         """Synthesize audio using CPU backend."""
         from scipy import signal
+        import sys
+        import concurrent.futures
 
         # Initialize or switch pipeline if language changed
         if self.pipeline is None or self.current_lang != lang_code:
             self.pipeline = self.KPipeline(lang_code=lang_code, repo_id=self.model_path)
             self.current_lang = lang_code
 
-        # Generate audio
-        generator = self.pipeline(
-            text,
-            voice=voice,
-            speed=speed,
-            split_pattern=r"\n+",
-        )
+        # Generate audio with timeout to prevent hanging
+        def run_generator():
+            """Run generator in a separate thread to allow timeout"""
+            return self.pipeline(
+                text,
+                voice=voice,
+                speed=speed,
+                split_pattern=r"\n+",
+            )
 
-        # Collect all audio chunks
+        # Try to get generator with short timeout
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_generator)
+                generator = future.result(timeout=10)  # 10 second timeout
+        except concurrent.futures.TimeoutError:
+            # Reset pipeline to recover from timeout
+            self.pipeline = None
+            self.current_lang = None
+            raise RuntimeError(f"Kokoro TTS timed out after 10s (text may be incompatible): {text[:50]}...")
+        except Exception as e:
+            raise RuntimeError(f"Generator creation failed: {e}")
+
+        # Collect all audio chunks with iteration limit
         audio_chunks = []
-        for _, (_, _, audio) in enumerate(generator):
-            audio_np = audio.numpy()
-            audio_chunks.append(audio_np)
+        max_iterations = 1000
+
+        try:
+            for i, result in enumerate(generator):
+                if i >= max_iterations:
+                    raise RuntimeError(f"Kokoro TTS exceeded maximum iterations ({max_iterations})")
+
+                # Extract audio from result
+                try:
+                    audio = None
+
+                    if hasattr(result, '__len__') and len(result) >= 2:
+                        if len(result) == 3:
+                            audio = result[2]  # (text, phonemes, audio)
+                        elif len(result) == 2:
+                            audio = result[1][1] if hasattr(result[1], '__len__') and len(result[1]) > 1 else result[1]
+                        else:
+                            audio = result[-1]
+                    else:
+                        audio = result
+
+                    if audio is None:
+                        raise ValueError(f"Could not extract audio from result")
+
+                    audio_np = audio.numpy() if hasattr(audio, 'numpy') else audio
+
+                    if not isinstance(audio_np, np.ndarray):
+                        raise ValueError(f"Audio is not a numpy array")
+
+                    audio_chunks.append(audio_np)
+
+                except Exception as unpack_error:
+                    raise RuntimeError(f"Audio extraction failed at iteration {i}: {unpack_error}")
+
+        except Exception as e:
+            raise RuntimeError(f"Generator iteration failed: {e}")
 
         if not audio_chunks:
             raise RuntimeError("No audio generated from CPU backend")
 
-        # Concatenate
+        # Concatenate chunks
         audio_data = np.concatenate(audio_chunks)
         sample_rate = 24000  # Kokoro default
 
@@ -232,16 +285,16 @@ class KokoroCPUBackend:
         return audio_data.astype(np.float32), sample_rate
 
 
-def create_backend(backend_type):
+def create_backend(backend_type, node=None):
     """Create the appropriate backend based on type."""
     if backend_type == "mlx":
         try:
-            return KokoroMLXBackend()
+            return KokoroMLXBackend(node=node)
         except ImportError as e:
             raise RuntimeError(f"MLX backend not available: {e}. Install with: pip install 'dora-kokoro-tts[mlx]'")
     elif backend_type == "cpu":
         try:
-            return KokoroCPUBackend()
+            return KokoroCPUBackend(node=node)
         except ImportError as e:
             raise RuntimeError(f"CPU backend not available: {e}. Install with: pip install kokoro")
     else:
@@ -276,24 +329,15 @@ def main():
     backend = None
     current_backend_type = backend_type
 
-    send_log(node, "INFO", f"Kokoro TTS Node initialized (backend: {backend_type})", LOG_LEVEL)
-    send_log(node, "INFO", f"Language: {LANGUAGE}, Voice: {VOICE}, Speed: {SPEED}", LOG_LEVEL)
-    if backend_type == "mlx":
-        send_log(node, "INFO", f"MLX Model: {KOKORO_MODEL_MLX}", LOG_LEVEL)
-    elif backend_type == "cpu":
-        send_log(node, "INFO", f"CPU Model: {KOKORO_MODEL_CPU}", LOG_LEVEL)
-    send_log(node, "INFO", "Using lazy initialization - backend will load on first text", LOG_LEVEL)
+    # Log configuration
+    send_log(node, "INFO", f"Kokoro TTS Node initialized: backend={backend_type}, lang={LANGUAGE}, voice={VOICE}, speed={SPEED}", LOG_LEVEL)
 
     # Statistics
     total_syntheses = 0
     total_duration = 0
     total_processing_time = 0
 
-    send_log(node, "INFO", "Entering event loop, waiting for events", LOG_LEVEL)
-
     for event in node:
-        send_log(node, "DEBUG", f"Received event: type={event['type']}, id={event.get('id', 'N/A')}", LOG_LEVEL)
-
         if event["type"] == "INPUT":
             input_id = event["id"]
 
@@ -307,12 +351,9 @@ def main():
                 session_status = metadata.get("session_status", "unknown") if metadata else "unknown"
                 session_id = metadata.get("session_id", "unknown") if metadata else "unknown"
 
-                send_log(node, "DEBUG", f"Received text: '{text}' (len={len(text)})", LOG_LEVEL)
-
                 # Skip if text is only punctuation or whitespace
                 text_stripped = text.strip()
                 if not text_stripped or all(c in '。！？.!?,，、；：""''（）【】《》\n\r\t ' for c in text_stripped):
-                    send_log(node, "DEBUG", f"Skipped - text is only punctuation/whitespace: '{text}'", LOG_LEVEL)
                     # Send segment_complete without audio
                     node.send_output(
                         "segment_complete",
@@ -325,13 +366,11 @@ def main():
                     )
                     continue
 
-                send_log(node, "INFO", f"Processing text (len={len(text)})", LOG_LEVEL)
-
                 # Lazy initialize backend on first use
                 if backend is None:
                     send_log(node, "INFO", f"Initializing {current_backend_type} backend...", LOG_LEVEL)
                     try:
-                        backend = create_backend(current_backend_type)
+                        backend = create_backend(current_backend_type, node)
                         send_log(node, "INFO", f"✅ {current_backend_type.upper()} backend initialized", LOG_LEVEL)
                     except Exception as e:
                         send_log(node, "ERROR", f"Failed to initialize backend: {e}", LOG_LEVEL)
@@ -352,11 +391,6 @@ def main():
                 lang_code = map_language_to_code(LANGUAGE)
                 if re.findall(r'[\u4e00-\u9fff]+', text):
                     lang_code = "z"  # Chinese detected
-
-                # Log synthesis parameters at DEBUG level
-                send_log(node, "DEBUG",
-                        f"Synthesis: text='{text[:50]}...' voice={VOICE} speed={SPEED} lang={lang_code}",
-                        LOG_LEVEL)
 
                 # Synthesize speech
                 start_time = time.time()
@@ -403,12 +437,9 @@ def main():
                             "session_id": session_id
                         }
                     )
-                    send_log(node, "INFO", "Sent segment_complete", LOG_LEVEL)
 
                 except Exception as e:
-                    error_details = traceback.format_exc()
                     send_log(node, "ERROR", f"Synthesis error: {e}", LOG_LEVEL)
-                    send_log(node, "ERROR", f"Traceback: {error_details}", LOG_LEVEL)
 
                     # Send segment completion with error status
                     node.send_output(
@@ -422,19 +453,17 @@ def main():
                             "error_stage": "synthesis"
                         }
                     )
-                    send_log(node, "ERROR", "Sent error segment_complete", LOG_LEVEL)
 
             elif input_id == "control":
                 # Handle control commands
                 command = event["value"][0].as_py()
 
                 if command == "reset":
-                    send_log(node, "INFO", "[KokoroTTS] RESET received", LOG_LEVEL)
                     # Reset statistics
                     total_syntheses = 0
                     total_duration = 0
                     total_processing_time = 0
-                    send_log(node, "INFO", "[KokoroTTS] Reset acknowledged", LOG_LEVEL)
+                    send_log(node, "INFO", "[KokoroTTS] Statistics reset", LOG_LEVEL)
 
                 elif command == "stats":
                     avg_rtf = total_processing_time / total_duration if total_duration > 0 else 0

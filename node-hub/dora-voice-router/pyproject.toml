@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dora-voice-router"
+version = "0.1.0"
+description = "Voice router for mofa-cast multi-voice TTS"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pyarrow>=14.0.0",
+]
+
+[project.scripts]
+dora-voice-router = "dora_voice_router.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dora_voice_router*"]
+
+[tool.setuptools.package-data]
+dora_voice_router = ["*.py"]

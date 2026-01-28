@@ -791,7 +791,29 @@ impl DoraBridge for AudioPlayerBridge {
         }
 
         if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
+            // Wait with timeout to avoid blocking indefinitely
+            // Use a shorter timeout since the event loop checks every 100ms
+            let timeout = std::time::Duration::from_secs(2);
+            let start = std::time::Instant::now();
+
+            loop {
+                if start.elapsed() > timeout {
+                    warn!("Audio player bridge disconnect timeout after {:?}", timeout);
+                    // Don't try to join after timeout - let the thread finish on its own
+                    // The thread will exit when it processes the stop signal
+                    break;
+                }
+
+                // Check if thread has finished
+                if handle.is_finished() {
+                    // Thread has finished, safe to join
+                    let _ = handle.join();
+                    break;
+                }
+
+                // Thread still running, wait a bit
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
 
         *self.state.write() = BridgeState::Disconnected;

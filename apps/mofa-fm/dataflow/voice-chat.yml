@@ -135,7 +135,7 @@ nodes:
     env:
       TRANSFORMERS_OFFLINE: "1"
       HF_HUB_OFFLINE: "1"
-      VOICE_NAME: "Zhao Daniu"
+      VOICE_NAME: "Ma Yun"
       PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
       TEXT_LANG: zh
       PROMPT_LANG: zh

@@ -34,6 +34,7 @@ pub fn get_cli_args() -> &'static Args {
 
 // App plugin system imports
 use mofa_widgets::{MofaApp, AppRegistry, TimerControl, PageRouter, PageId, tab_clicked};
+use mofa_cast::MoFaCastApp;
 use mofa_fm::{MoFaFMApp, MoFaFMScreenWidgetRefExt};
 use mofa_debate::MoFaDebateApp;
 use mofa_settings::MoFaSettingsApp;
@@ -390,6 +391,7 @@ impl LiveHook for App {
         // Initialize the app registry with all installed apps
         self.app_registry.register(MoFaFMApp::info());
         self.app_registry.register(MoFaDebateApp::info());
+        self.app_registry.register(MoFaCastApp::info());
         self.app_registry.register(MoFaSettingsApp::info());
 
         // Initialize page router (defaults to MoFA FM)
@@ -460,6 +462,7 @@ impl LiveRegister for App {
         // (Makepad constraint), but registration uses the standardized trait interface
         <MoFaFMApp as MofaApp>::live_design(cx);
         <MoFaDebateApp as MofaApp>::live_design(cx);
+        <MoFaCastApp as MofaApp>::live_design(cx);
         <MoFaSettingsApp as MofaApp>::live_design(cx);
 
         // Shell widgets (order matters - tabs before dashboard, apps before dashboard)

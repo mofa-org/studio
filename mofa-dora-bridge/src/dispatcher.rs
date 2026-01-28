@@ -88,9 +88,11 @@ impl DynamicNodeDispatcher {
     /// Create bridges for all discovered MoFA nodes
     pub fn create_bridges(&mut self) -> BridgeResult<()> {
         let mofa_nodes = self.discover_mofa_nodes();
+        info!("Creating bridges for {} discovered mofa nodes", mofa_nodes.len());
         let shared_state = Some(self.shared_state.clone());
 
         for node_spec in mofa_nodes {
+            info!("Creating bridge for node '{}' (type: {:?})", node_spec.id, node_spec.node_type);
             let bridge: Box<dyn DoraBridge> = match node_spec.node_type {
                 MofaNodeType::AudioPlayer => Box::new(AudioPlayerBridge::with_shared_state(
                     &node_spec.id,
@@ -101,6 +103,10 @@ impl DynamicNodeDispatcher {
                     shared_state.clone(),
                 )),
                 MofaNodeType::PromptInput => Box::new(PromptInputBridge::with_shared_state(
+                    &node_spec.id,
+                    shared_state.clone(),
+                )),
+                MofaNodeType::MoFACast => Box::new(CastControllerBridge::with_shared_state(
                     &node_spec.id,
                     shared_state.clone(),
                 )),
@@ -228,6 +234,11 @@ impl DynamicNodeDispatcher {
         // This is necessary because `dora start --detach` returns immediately
         info!("Waiting for dataflow to initialize...");
         std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // Additional wait for TTS nodes to load their models
+        // Kokoro TTS needs time to load MLX/CPU models before accepting input
+        info!("Waiting for TTS nodes to load models...");
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // Create bridges if not already created
         if self.bridges.is_empty() {

@@ -1,0 +1,162 @@
+# Multi-Voice Batch TTS Dataflow for mofa-cast
+#
+# This dataflow supports multiple voices (Luo Xiang, Yang Mi, Ma Yun) for TTS synthesis.
+# Routes segments based on voice_name in JSON input.
+#
+# Usage:
+#   dora start dataflow/multi-voice-batch-tts.yml --name mofa-cast-multi-voice
+
+nodes:
+  # ========================================
+  # Input: Dynamic node from mofa-studio
+  # ========================================
+
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      # Merge audio from all 3 TTS nodes
+      audio_luo_xiang: primespeech-luo-xiang/audio
+      audio_ma_yun: primespeech-ma-yun/audio
+      audio_ma_baoguo: primespeech-ma-baoguo/audio
+
+      # Merge segment_complete from all 3 TTS nodes
+      segment_complete_luo_xiang: primespeech-luo-xiang/segment_complete
+      segment_complete_ma_yun: primespeech-ma-yun/segment_complete
+      segment_complete_ma_baoguo: primespeech-ma-baoguo/segment_complete
+
+      # Merge logs from all nodes
+      log_router: voice-router/log
+      log_luo_xiang: primespeech-luo-xiang/log
+      log_ma_yun: primespeech-ma-yun/log
+      log_ma_baoguo: primespeech-ma-baoguo/log
+    outputs:
+      - text
+
+  # ========================================
+  # Voice Router: Routes text to appropriate TTS node
+  # ========================================
+
+  - id: voice-router
+    build: pip install -e ../../../node-hub/dora-voice-router
+    path: dora-voice-router
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - text_luo_xiang
+      - text_ma_yun
+      - text_ma_baoguo
+      - text_fallback
+      - log
+    env:
+      LOG_LEVEL: "INFO"
+
+  # ========================================
+  # TTS Node 1: Luo Xiang (Deep male voice - authoritative)
+  # ========================================
+
+  - id: primespeech-luo-xiang
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: voice-router/text_luo_xiang
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+      VOICE_NAME: "Luo Xiang"
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: zh
+      PROMPT_LANG: zh
+      TOP_K: 5
+      TOP_P: 1.0
+      TEMPERATURE: 1.0
+      SPEED_FACTOR: 1.0
+      FRAGMENT_INTERVAL: "0.1"
+      USE_GPU: false
+      NUM_THREADS: 4
+      RETURN_FRAGMENT: "false"
+      LOG_LEVEL: DEBUG
+      ENABLE_INTERNAL_SEGMENTATION: "true"
+      TTS_MAX_SEGMENT_LENGTH: "100"
+      TTS_MIN_SEGMENT_LENGTH: "20"
+
+  # ========================================
+  # TTS Node 2: Ma Yun (Energetic male voice)
+  # ========================================
+
+  - id: primespeech-ma-yun
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: voice-router/text_ma_yun
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+      VOICE_NAME: "Ma Yun"
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: zh
+      PROMPT_LANG: zh
+      TOP_K: 5
+      TOP_P: 1.0
+      TEMPERATURE: 1.0
+      SPEED_FACTOR: 1.0
+      FRAGMENT_INTERVAL: "0.1"
+      USE_GPU: false
+      NUM_THREADS: 4
+      RETURN_FRAGMENT: "false"
+      LOG_LEVEL: DEBUG
+      ENABLE_INTERNAL_SEGMENTATION: "true"
+      TTS_MAX_SEGMENT_LENGTH: "100"
+      TTS_MIN_SEGMENT_LENGTH: "20"
+
+  # ========================================
+  # TTS Node 3: Ma Baoguo (Characteristic voice)
+  # ========================================
+
+  - id: primespeech-ma-baoguo
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: voice-router/text_ma_baoguo
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+      VOICE_NAME: "Ma Baoguo"
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: zh
+      PROMPT_LANG: zh
+      TOP_K: 5
+      TOP_P: 1.0
+      TEMPERATURE: 1.0
+      SPEED_FACTOR: 1.0
+      FRAGMENT_INTERVAL: "0.1"
+      USE_GPU: false
+      NUM_THREADS: 4
+      RETURN_FRAGMENT: "false"
+      LOG_LEVEL: DEBUG
+      ENABLE_INTERNAL_SEGMENTATION: "true"
+      TTS_MAX_SEGMENT_LENGTH: "100"
+      TTS_MIN_SEGMENT_LENGTH: "20"
+
+  # ========================================
+  # Logging: System log viewer
+  # ========================================
+
+  - id: mofa-system-log
+    path: dynamic
+    inputs:
+      log_router: voice-router/log
+      log_luo_xiang: primespeech-luo-xiang/log
+      log_ma_yun: primespeech-ma-yun/log
+      log_ma_baoguo: primespeech-ma-baoguo/log

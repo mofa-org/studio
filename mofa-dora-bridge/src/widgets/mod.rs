@@ -13,8 +13,10 @@ mod aec_input;
 mod audio_player;
 mod prompt_input;
 mod system_log;
+mod cast_controller;
 
 pub use aec_input::{AecControlCommand, AecInputBridge};
 pub use audio_player::AudioPlayerBridge;
 pub use prompt_input::PromptInputBridge;
 pub use system_log::SystemLogBridge;
+pub use cast_controller::CastControllerBridge;

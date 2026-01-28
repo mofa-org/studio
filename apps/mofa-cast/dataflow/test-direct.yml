@@ -1,0 +1,83 @@
+# Batch TTS Dataflow for mofa-cast
+#
+# This dataflow handles batch text-to-speech synthesis using dora-kokoro-tts.
+# Integrates with mofa-studio via dynamic nodes for UI control and audio output.
+#
+# Usage:
+#   dora start dataflow/batch-tts.yml --name mofa-cast-tts
+
+nodes:
+  # ========================================
+  # Input: Dynamic node from mofa-studio
+  # ========================================
+
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: primespeech-tts/audio
+      segment_complete: primespeech-tts/segment_complete
+      log: text-segmenter/log
+      log_tts: primespeech-tts/log
+    outputs:
+      - text
+
+  # ========================================
+  # Processing: Text Segmentation
+  # ========================================
+
+  - id: text-segmenter
+    build: pip install -e ../../../node-hub/dora-text-segmenter
+    path: dora-text-segmenter
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - text_segment
+      - status
+      - metrics
+      - log
+    env:
+      SEGMENTER_MODE: "passthrough"
+      LOG_LEVEL: "INFO"
+
+  # ========================================
+  # TTS: PrimeSpeech Text-to-Speech (中文)
+  # ========================================
+
+  - id: primespeech-tts
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: text-segmenter/text_segment
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+      VOICE_NAME: "Luo Xiang"
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: zh
+      PROMPT_LANG: zh
+      TOP_K: 5
+      TOP_P: 1.0
+      TEMPERATURE: 1.0
+      SPEED_FACTOR: 1.0
+      FRAGMENT_INTERVAL: "0.1"
+      USE_GPU: false
+      NUM_THREADS: 4
+      RETURN_FRAGMENT: "false"
+      LOG_LEVEL: INFO
+      ENABLE_INTERNAL_SEGMENTATION: "true"
+      TTS_MAX_SEGMENT_LENGTH: "100"
+      TTS_MIN_SEGMENT_LENGTH: "20"
+
+  # ========================================
+  # Logging: System log viewer
+  # ========================================
+
+  - id: mofa-system-log
+    path: dynamic
+    inputs:
+      log_input: text-segmenter/log
+      log_tts: primespeech-tts/log

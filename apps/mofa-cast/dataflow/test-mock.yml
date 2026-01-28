@@ -1,0 +1,27 @@
+# Mock TTS Test Dataflow
+# Uses mock-tts for stable testing
+
+nodes:
+  # Input: Dynamic node from mofa-studio
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: mock-tts/audio
+      segment_complete: mock-tts/segment_complete
+      log: mock-tts/log
+    outputs:
+      - text
+
+  # TTS: Mock TTS (test tones, stable)
+  - id: mock-tts
+    build: pip install -e ../../../node-hub/dora-mock-tts
+    path: dora-mock-tts
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      TONE_DURATION: "0.5"  # 0.5 seconds per test tone
+      LOG_LEVEL: "INFO"

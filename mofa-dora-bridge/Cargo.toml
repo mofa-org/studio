@@ -22,6 +22,7 @@ crossbeam-channel.workspace = true
 
 # Logging
 tracing.workspace = true
+log.workspace = true
 
 # Error handling
 thiserror.workspace = true

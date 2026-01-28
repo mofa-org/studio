@@ -337,7 +337,24 @@ impl DoraBridge for PromptInputBridge {
         }
 
         if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
+            // Wait with timeout to avoid blocking indefinitely
+            let timeout = std::time::Duration::from_secs(2);
+            let start = std::time::Instant::now();
+
+            loop {
+                if start.elapsed() > timeout {
+                    warn!("Prompt input bridge disconnect timeout after {:?}", timeout);
+                    // Don't try to join after timeout - let the thread finish on its own
+                    break;
+                }
+
+                if handle.is_finished() {
+                    let _ = handle.join();
+                    break;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
 
         *self.state.write() = BridgeState::Disconnected;

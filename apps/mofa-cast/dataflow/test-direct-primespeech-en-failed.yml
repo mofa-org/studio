@@ -1,0 +1,34 @@
+# PrimeSpeech TTS Dataflow for mofa-cast
+# Uses PrimeSpeech TTS (more stable than Kokoro)
+
+nodes:
+  # Input: Dynamic node from mofa-studio
+  - id: mofa-cast-controller
+    path: dynamic
+    inputs:
+      audio: primespeech-tts/audio
+      segment_complete: primespeech-tts/segment_complete
+      log: primespeech-tts/log
+    outputs:
+      - text
+
+  # TTS: PrimeSpeech Text-to-Speech
+  - id: primespeech-tts
+    build: pip install -e ../../../libs/dora-common -e ../../../node-hub/dora-primespeech
+    path: dora-primespeech
+    inputs:
+      text: mofa-cast-controller/text
+    outputs:
+      - audio
+      - segment_complete
+      - log
+    env:
+      PRIMESPEECH_MODEL_DIR: $HOME/.dora/models/primespeech
+      TEXT_LANG: en
+      PROMPT_LANG: en
+      VOICE_NAME: "af_heart"
+      SPEED_FACTOR: 1.0
+      TOP_K: 5
+      TOP_P: 0.9
+      TEMPERATURE: 0.7
+      LOG_LEVEL: "INFO"

@@ -4,10 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["mofa-fm", "mofa-settings", "mofa-debate"]
+default = ["mofa-fm", "mofa-settings", "mofa-debate", "mofa-cast"]
 mofa-fm = ["dep:mofa-fm"]
 mofa-settings = ["dep:mofa-settings"]
 mofa-debate = ["dep:mofa-debate"]
+mofa-cast = ["dep:mofa-cast"]
 
 [dependencies]
 makepad-widgets.workspace = true
@@ -17,6 +18,7 @@ mofa-dora-bridge = { path = "../mofa-dora-bridge" }
 mofa-fm = { path = "../apps/mofa-fm", optional = true }
 mofa-settings = { path = "../apps/mofa-settings", optional = true }
 mofa-debate = { path = "../apps/mofa-debate", optional = true }
+mofa-cast = { path = "../apps/mofa-cast", optional = true }
 
 # Audio
 cpal.workspace = true

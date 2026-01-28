@@ -1,0 +1,614 @@
+{
+  "nodes": [
+    {
+      "id": "title",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 1800,
+      "height": 140,
+      "color": "1",
+      "text": "# 🎙️ Voice Chat Dataflow - Modular MoFA Integration\n\n## 多参与者实时语音对话系统\n\n**核心特性**：FIFO 会话队列 · 3种不同音色 · 音频拼接 · 背压控制\n\n---\n\n**参与者**：Student1 (马云音) · Student2 (杨幂音) · Tutor (罗翔音)"
+    },
+    {
+      "id": "group-llm-agents",
+      "type": "group",
+      "x": 50,
+      "y": 180,
+      "width": 380,
+      "height": 700,
+      "label": "LLM 智能体 (MaaS)",
+      "color": "5"
+    },
+    {
+      "id": "student1",
+      "type": "text",
+      "x": 100,
+      "y": 230,
+      "width": 280,
+      "height": 180,
+      "color": "3",
+      "text": "## Student1\n\n**角色**：学生1\n**音色**：马云 (理性男声)\n**配置**：`study_config_student1.toml`\n\n**输入**：\n- `bridge-to-student1/text`\n- `conference-controller/llm_control`\n\n**输出**：\n- text\n- status\n- log"
+    },
+    {
+      "id": "student2",
+      "type": "text",
+      "x": 100,
+      "y": 440,
+      "width": 280,
+      "height": 180,
+      "color": "6",
+      "text": "## Student2\n\n**角色**：学生2\n**音色**：杨幂 (情感女声)\n**配置**：`study_config_student2.toml`\n\n**输入**：\n- `bridge-to-student2/text`\n- `conference-controller/llm_control`\n\n**输出**：\n- text\n- status\n- log"
+    },
+    {
+      "id": "tutor",
+      "type": "text",
+      "x": 100,
+      "y": 650,
+      "width": 280,
+      "height": 180,
+      "color": "4",
+      "text": "## Tutor\n\n**角色**：导师/评委\n**音色**：罗翔 (权威男声)\n**配置**：`study_config_tutor.toml`\n\n**输入**：\n- `bridge-to-tutor/text`\n- `conference-controller/judge_prompt`\n\n**输出**：\n- text\n- status\n- log"
+    },
+    {
+      "id": "group-bridges",
+      "type": "group",
+      "x": 470,
+      "y": 180,
+      "width": 400,
+      "height": 700,
+      "label": "会议桥接器 (Switch)",
+      "color": "2"
+    },
+    {
+      "id": "bridge-to-student1",
+      "type": "text",
+      "x": 520,
+      "y": 230,
+      "width": 300,
+      "height": 180,
+      "color": "3",
+      "text": "## Bridge to Student1\n\n**路由**：Student2 + Tutor → Student1\n\n**输入**：\n- `student2/text` (queue: 1000)\n- `tutor/text` (queue: 1000)\n- `control_llm1`\n\n**输出**：\n- text (合并流)\n- status\n- log\n\n**功能**：多参与者流式合并"
+    },
+    {
+      "id": "bridge-to-student2",
+      "type": "text",
+      "x": 520,
+      "y": 440,
+      "width": 300,
+      "height": 180,
+      "color": "6",
+      "text": "## Bridge to Student2\n\n**路由**：Student1 + Tutor → Student2\n\n**输入**：\n- `student1/text` (queue: 1000)\n- `tutor/text` (queue: 1000)\n- `control_llm2`\n\n**输出**：\n- text (合并流)\n- status\n- log\n\n**功能**：多参与者流式合并"
+    },
+    {
+      "id": "bridge-to-tutor",
+      "type": "text",
+      "x": 520,
+      "y": 650,
+      "width": 300,
+      "height": 180,
+      "color": "4",
+      "text": "## Bridge to Tutor\n\n**路由**：Student1 + Student2 → Tutor\n\n**输入**：\n- `student1/text` (queue: 1000)\n- `student2/text` (queue: 1000)\n- `control_judge`\n\n**输出**：\n- text (合并流)\n- status\n- log\n\n**功能**：多参与者流式合并"
+    },
+    {
+      "id": "group-controller",
+      "type": "group",
+      "x": 910,
+      "y": 180,
+      "width": 420,
+      "height": 400,
+      "label": "会议控制器 (大脑)",
+      "color": "1"
+    },
+    {
+      "id": "conference-controller",
+      "type": "text",
+      "x": 960,
+      "y": 230,
+      "width": 320,
+      "height": 280,
+      "color": "1",
+      "text": "## Conference Controller\n\n**功能**：系统协调与调度\n\n**策略**：\n```\n[(tutor, *), (student2, 1), (student1, 2)]\n```\n\n**输入**：\n- 3个参与者的 text\n- `mofa-prompt-input/control`\n- `mofa-audio-player/session_start`\n- `buffer_status` (背压控制)\n\n**输出**：\n- `control_judge`\n- `control_llm1/2`\n- `llm_control`\n- `judge_prompt`\n\n**音频缓冲阈值**：30/10"
+    },
+    {
+      "id": "group-segmenter",
+      "type": "group",
+      "x": 1370,
+      "y": 180,
+      "width": 420,
+      "height": 400,
+      "label": "文本分段器",
+      "color": "5"
+    },
+    {
+      "id": "multi-text-segmenter",
+      "type": "text",
+      "x": 1420,
+      "y": 230,
+      "width": 320,
+      "height": 280,
+      "color": "5",
+      "text": "## Multi-Text Segmenter\n\n**模式**：Conference (FIFO队列)\n\n**输入**：\n- `student1/text` (queue: 1000)\n- `student2/text` (queue: 1000)\n- `tutor/text` (queue: 1000)\n- `audio_complete` (完成信号)\n- `audio_buffer_control` (背压)\n- `control/reset`\n\n**输出**：\n- `text_segment_student1/2/tutor`\n- status/metrics/log\n\n**分段长度**：5-15 字符\n**水位标记**：30/60"
+    },
+    {
+      "id": "group-tts",
+      "type": "group",
+      "x": 1370,
+      "y": 620,
+      "width": 420,
+      "height": 700,
+      "label": "TTS 语音合成 (PrimeSpeech)",
+      "color": "3"
+    },
+    {
+      "id": "primespeech-student1",
+      "type": "text",
+      "x": 1420,
+      "y": 670,
+      "width": 320,
+      "height": 180,
+      "color": "3",
+      "text": "## PrimeSpeech - Student1\n\n**音色**：马云 (男声)\n**语速**：1.1x\n\n**输入**：\n- `text_segment_student1`\n\n**输出**：\n- audio\n- status\n- segment_complete\n- log\n\n**配置**：\n- TOP_K: 5\n- TEMP: 1.0\n- Fragment: 0.2s"
+    },
+    {
+      "id": "primespeech-student2",
+      "type": "text",
+      "x": 1420,
+      "y": 880,
+      "width": 320,
+      "height": 180,
+      "color": "6",
+      "text": "## PrimeSpeech - Student2\n\n**音色**：杨幂 (女声)\n**语速**：1.1x\n\n**输入**：\n- `text_segment_student2`\n\n**输出**：\n- audio\n- status\n- segment_complete\n- log\n\n**配置**：\n- TOP_K: 5\n- TEMP: 1.0\n- Fragment: 0.2s"
+    },
+    {
+      "id": "primespeech-tutor",
+      "type": "text",
+      "x": 1420,
+      "y": 1090,
+      "width": 320,
+      "height": 180,
+      "color": "4",
+      "text": "## PrimeSpeech - Tutor\n\n**音色**：罗翔 (男声)\n**语速**：1.1x\n\n**输入**：\n- `text_segment_tutor`\n\n**输出**：\n- audio\n- status\n- segment_complete\n- log\n\n**配置**：\n- TOP_K: 5\n- TEMP: 1.0\n- Fragment: 0.1s"
+    },
+    {
+      "id": "group-mofa-ui",
+      "type": "group",
+      "x": 910,
+      "y": 620,
+      "width": 420,
+      "height": 700,
+      "label": "MoFA 动态节点 (UI)",
+      "color": "2"
+    },
+    {
+      "id": "mofa-audio-player",
+      "type": "text",
+      "x": 960,
+      "y": 670,
+      "width": 320,
+      "height": 220,
+      "color": "2",
+      "text": "## MoFA Audio Player\n\n**功能**：音频播放 + LED可视化\n\n**输入**：\n- `audio_student1/2/tutor`\n- `control`\n\n**输出**：\n- `buffer_status` (背压)\n- `session_start`\n- `audio_complete`\n- status/log\n\n**特性**：\n- 音频拼接\n- FIFO 播放\n- 缓冲区管理"
+    },
+    {
+      "id": "mofa-prompt-input",
+      "type": "text",
+      "x": 960,
+      "y": 920,
+      "width": 320,
+      "height": 180,
+      "color": "2",
+      "text": "## MoFA Prompt Input\n\n**功能**：聊天显示 + 用户控制\n\n**输入**：\n- `llm1/2/judge_text`\n\n**输出**：\n- `control` (用户指令)\n\n**特性**：\n- 实时显示LLM输出\n- 用户控制接口"
+    },
+    {
+      "id": "mofa-system-log",
+      "type": "text",
+      "x": 960,
+      "y": 1130,
+      "width": 320,
+      "height": 160,
+      "color": "2",
+      "text": "## MoFA System Log\n\n**功能**：聚合所有节点日志\n\n**输入**：\n- 3个 LLM log/status/text\n- 3个 Bridge log/status/text\n- Controller status/log/controls\n- 3个 TTS log/status\n- Audio player status/log\n- Segmenter log/status\n\n**输出**：统一日志视图"
+    },
+    {
+      "id": "dataflow-explanation",
+      "type": "text",
+      "x": 50,
+      "y": 1360,
+      "width": 1740,
+      "height": 280,
+      "color": "1",
+      "text": "## 🔄 完整数据流说明\n\n### 1️⃣ LLM 生成阶段\n```\nStudent1/2/Tutor → 生成文本 → status/log\n```\n\n### 2️⃣ 桥接路由阶段\n```\nLLM文本 → Conference Bridge (合并其他参与者流) → 目标LLM输入\n                     ↓\n              Conference Controller (协调谁发言)\n```\n\n### 3️⃣ 文本分段阶段\n```\nLLM文本 → Multi-Text Segmenter (FIFO队列 + 背压控制)\n         ↓\n      按句子分段 (5-15字符)\n         ↓\n   text_segment_student1/2/tutor\n```\n\n### 4️⃣ 语音合成阶段\n```\ntext_segment_x → PrimeSpeech TTS (不同音色) → audio + segment_complete\n```\n\n### 5️⃣ 音频播放阶段\n```\naudio_student1/2/tutor → MoFA Audio Player (拼接 + FIFO) → 扬声器\n                                ↓\n                         audio_complete (反馈给Segmenter)\n                         buffer_status (背压控制)\n```\n\n### 6️⃣ UI 显示阶段\n```\nLLM text → MoFA Prompt Input (聊天显示)\nAll logs → MoFA System Log (统一日志)\n```"
+    },
+    {
+      "id": "key-features",
+      "type": "text",
+      "x": 50,
+      "y": 1680,
+      "width": 1740,
+      "height": 200,
+      "color": "4",
+      "text": "## 🎯 核心技术特性\n\n| 特性 | 实现方式 | 作用 |\n|------|---------|------|\n| **FIFO 会话队列** | Multi-Text Segmenter | 保证先到先播放，避免乱序 |\n| **3种音色** | PrimeSpeech (马/杨/罗) | 区分不同参与者身份 |\n| **音频拼接** | MoFA Audio Player | 按到达顺序拼接音频片段 |\n| **背压控制** | buffer_status (30/10) | 防止音频积压，实时流式 |\n| **流式合并** | Conference Bridge | 多个参与者流实时合并 |\n| **策略调度** | Conference Controller | 控制发言顺序和优先级 |\n| **动态节点** | MoFA UI Widgets | 运行时加载的前端组件 |\n\n**启动命令**：`dora start voice-chat.yml`"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "title",
+      "fromSide": "bottom",
+      "toNode": "student1",
+      "toSide": "top",
+      "label": "参与者1"
+    },
+    {
+      "id": "e2",
+      "fromNode": "title",
+      "fromSide": "bottom",
+      "toNode": "bridge-to-student1",
+      "toSide": "top",
+      "label": "桥接"
+    },
+    {
+      "id": "e3",
+      "fromNode": "title",
+      "fromSide": "bottom",
+      "toNode": "conference-controller",
+      "toSide": "top",
+      "label": "控制"
+    },
+    {
+      "id": "e4",
+      "fromNode": "title",
+      "fromSide": "bottom",
+      "toNode": "multi-text-segmenter",
+      "toSide": "top",
+      "label": "分段"
+    },
+    {
+      "id": "e5",
+      "fromNode": "student1",
+      "fromSide": "right",
+      "toNode": "bridge-to-student2",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e6",
+      "fromNode": "student1",
+      "fromSide": "right",
+      "toNode": "bridge-to-tutor",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e7",
+      "fromNode": "student2",
+      "fromSide": "right",
+      "toNode": "bridge-to-student1",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e8",
+      "fromNode": "student2",
+      "fromSide": "right",
+      "toNode": "bridge-to-tutor",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e9",
+      "fromNode": "tutor",
+      "fromSide": "right",
+      "toNode": "bridge-to-student1",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e10",
+      "fromNode": "tutor",
+      "fromSide": "right",
+      "toNode": "bridge-to-student2",
+      "toSide": "left",
+      "label": "text"
+    },
+    {
+      "id": "e11",
+      "fromNode": "bridge-to-student1",
+      "fromSide": "right",
+      "toNode": "student1",
+      "toSide": "left",
+      "label": "merged text",
+      "color": "3"
+    },
+    {
+      "id": "e12",
+      "fromNode": "bridge-to-student2",
+      "fromSide": "right",
+      "toNode": "student2",
+      "toSide": "left",
+      "label": "merged text",
+      "color": "6"
+    },
+    {
+      "id": "e13",
+      "fromNode": "bridge-to-tutor",
+      "fromSide": "right",
+      "toNode": "tutor",
+      "toSide": "left",
+      "label": "merged text",
+      "color": "4"
+    },
+    {
+      "id": "e14",
+      "fromNode": "conference-controller",
+      "fromSide": "right",
+      "toNode": "multi-text-segmenter",
+      "toSide": "left",
+      "label": "control/reset",
+      "color": "1"
+    },
+    {
+      "id": "e15",
+      "fromNode": "student1",
+      "fromSide": "bottom",
+      "toNode": "multi-text-segmenter",
+      "toSide": "top",
+      "label": "text → 分段",
+      "color": "3"
+    },
+    {
+      "id": "e16",
+      "fromNode": "student2",
+      "fromSide": "bottom",
+      "toNode": "multi-text-segmenter",
+      "toSide": "top",
+      "label": "text → 分段",
+      "color": "6"
+    },
+    {
+      "id": "e17",
+      "fromNode": "tutor",
+      "fromSide": "bottom",
+      "toNode": "multi-text-segmenter",
+      "toSide": "top",
+      "label": "text → 分段",
+      "color": "4"
+    },
+    {
+      "id": "e18",
+      "fromNode": "multi-text-segmenter",
+      "fromSide": "bottom",
+      "toNode": "primespeech-student1",
+      "toSide": "top",
+      "label": "text_segment_student1",
+      "color": "5"
+    },
+    {
+      "id": "e19",
+      "fromNode": "multi-text-segmenter",
+      "fromSide": "bottom",
+      "toNode": "primespeech-student2",
+      "toSide": "top",
+      "label": "text_segment_student2",
+      "color": "5"
+    },
+    {
+      "id": "e20",
+      "fromNode": "multi-text-segmenter",
+      "fromSide": "bottom",
+      "toNode": "primespeech-tutor",
+      "toSide": "top",
+      "label": "text_segment_tutor",
+      "color": "5"
+    },
+    {
+      "id": "e21",
+      "fromNode": "primespeech-student1",
+      "fromSide": "left",
+      "toNode": "mofa-audio-player",
+      "toSide": "right",
+      "label": "audio",
+      "color": "3"
+    },
+    {
+      "id": "e22",
+      "fromNode": "primespeech-student2",
+      "fromSide": "left",
+      "toNode": "mofa-audio-player",
+      "toSide": "right",
+      "label": "audio",
+      "color": "6"
+    },
+    {
+      "id": "e23",
+      "fromNode": "primespeech-tutor",
+      "fromSide": "left",
+      "toNode": "mofa-audio-player",
+      "toSide": "right",
+      "label": "audio",
+      "color": "4"
+    },
+    {
+      "id": "e24",
+      "fromNode": "mofa-audio-player",
+      "fromSide": "right",
+      "toNode": "multi-text-segmenter",
+      "toSide": "bottom",
+      "label": "audio_complete (反馈)",
+      "toEnd": "arrow",
+      "color": "2"
+    },
+    {
+      "id": "e25",
+      "fromNode": "mofa-audio-player",
+      "fromSide": "top",
+      "toNode": "conference-controller",
+      "toSide": "bottom",
+      "label": "buffer_status (背压)",
+      "toEnd": "arrow",
+      "color": "2"
+    },
+    {
+      "id": "e26",
+      "fromNode": "mofa-audio-player",
+      "fromSide": "bottom",
+      "toNode": "conference-controller",
+      "toSide": "bottom",
+      "label": "session_start",
+      "color": "2"
+    },
+    {
+      "id": "e27",
+      "fromNode": "student1",
+      "fromSide": "right",
+      "toNode": "mofa-prompt-input",
+      "toSide": "left",
+      "label": "llm1_text",
+      "color": "3"
+    },
+    {
+      "id": "e28",
+      "fromNode": "student2",
+      "fromSide": "right",
+      "toNode": "mofa-prompt-input",
+      "toSide": "left",
+      "label": "llm2_text",
+      "color": "6"
+    },
+    {
+      "id": "e29",
+      "fromNode": "tutor",
+      "fromSide": "right",
+      "toNode": "mofa-prompt-input",
+      "toSide": "left",
+      "label": "judge_text",
+      "color": "4"
+    },
+    {
+      "id": "e30",
+      "fromNode": "mofa-prompt-input",
+      "fromSide": "top",
+      "toNode": "conference-controller",
+      "toSide": "bottom",
+      "label": "control (用户指令)",
+      "toEnd": "arrow",
+      "color": "2"
+    },
+    {
+      "id": "e31",
+      "fromNode": "student1",
+      "fromSide": "right",
+      "toNode": "mofa-system-log",
+      "toSide": "left",
+      "label": "log/status/text",
+      "color": "3"
+    },
+    {
+      "id": "e32",
+      "fromNode": "student2",
+      "fromSide": "right",
+      "toNode": "mofa-system-log",
+      "toSide": "left",
+      "label": "log/status/text",
+      "color": "6"
+    },
+    {
+      "id": "e33",
+      "fromNode": "tutor",
+      "fromSide": "right",
+      "toNode": "mofa-system-log",
+      "toSide": "left",
+      "label": "log/status/text",
+      "color": "4"
+    },
+    {
+      "id": "e34",
+      "fromNode": "bridge-to-student1",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log",
+      "color": "3"
+    },
+    {
+      "id": "e35",
+      "fromNode": "bridge-to-student2",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log",
+      "color": "6"
+    },
+    {
+      "id": "e36",
+      "fromNode": "bridge-to-tutor",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log",
+      "color": "4"
+    },
+    {
+      "id": "e37",
+      "fromNode": "conference-controller",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status/controls",
+      "color": "1"
+    },
+    {
+      "id": "e38",
+      "fromNode": "multi-text-segmenter",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status",
+      "color": "5"
+    },
+    {
+      "id": "e39",
+      "fromNode": "primespeech-student1",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status",
+      "color": "3"
+    },
+    {
+      "id": "e40",
+      "fromNode": "primespeech-student2",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status",
+      "color": "6"
+    },
+    {
+      "id": "e41",
+      "fromNode": "primespeech-tutor",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status",
+      "color": "4"
+    },
+    {
+      "id": "e42",
+      "fromNode": "mofa-audio-player",
+      "fromSide": "bottom",
+      "toNode": "mofa-system-log",
+      "toSide": "top",
+      "label": "log/status",
+      "color": "2"
+    },
+    {
+      "id": "e43",
+      "fromNode": "dataflow-explanation",
+      "fromSide": "bottom",
+      "toNode": "key-features",
+      "toSide": "top"
+    }
+  ]
+}

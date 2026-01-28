@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+</head>
+
+<body>
+    <div class="mermaid">
+        flowchart TB
+  mofa-cast-controller["**mofa-cast-controller**"]
+  mofa-system-log[/"**mofa-system-log**"\]
+  primespeech-luo-xiang["**primespeech-luo-xiang**"]
+  primespeech-ma-baoguo["**primespeech-ma-baoguo**"]
+  primespeech-ma-yun["**primespeech-ma-yun**"]
+  voice-router["**voice-router**"]
+  primespeech-luo-xiang -- audio as audio_luo_xiang --> mofa-cast-controller
+  primespeech-ma-baoguo -- audio as audio_ma_baoguo --> mofa-cast-controller
+  primespeech-ma-yun -- audio as audio_ma_yun --> mofa-cast-controller
+  primespeech-luo-xiang -- log as log_luo_xiang --> mofa-cast-controller
+  primespeech-ma-baoguo -- log as log_ma_baoguo --> mofa-cast-controller
+  primespeech-ma-yun -- log as log_ma_yun --> mofa-cast-controller
+  voice-router -- log as log_router --> mofa-cast-controller
+  primespeech-luo-xiang -- segment_complete as segment_complete_luo_xiang --> mofa-cast-controller
+  primespeech-ma-baoguo -- segment_complete as segment_complete_ma_baoguo --> mofa-cast-controller
+  primespeech-ma-yun -- segment_complete as segment_complete_ma_yun --> mofa-cast-controller
+  primespeech-luo-xiang -- log as log_luo_xiang --> mofa-system-log
+  primespeech-ma-baoguo -- log as log_ma_baoguo --> mofa-system-log
+  primespeech-ma-yun -- log as log_ma_yun --> mofa-system-log
+  voice-router -- log as log_router --> mofa-system-log
+  voice-router -- text_luo_xiang as text --> primespeech-luo-xiang
+  voice-router -- text_ma_baoguo as text --> primespeech-ma-baoguo
+  voice-router -- text_ma_yun as text --> primespeech-ma-yun
+  mofa-cast-controller -- text --> voice-router
+
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, securityLevel: 'loose', theme: 'base' });
+    </script>
+</body>
+
+</html>

@@ -317,7 +317,7 @@ class TTS:
     def init_vits_weights(self, weights_path: str):
         print(f"Loading VITS weights from {weights_path}")
         self.configs.vits_weights_path = weights_path
-        dict_s2 = torch.load(weights_path, map_location="cpu")
+        dict_s2 = torch.load(weights_path, map_location="cpu", weights_only=False)
         hps = dict_s2["config"]
         if dict_s2['weight']['enc_p.text_embedding.weight'].shape[0] == 322:
             self.configs.update_version("v1")
@@ -356,7 +356,7 @@ class TTS:
         self.configs.t2s_weights_path = weights_path
         self.configs.save_configs()
         self.configs.hz = 50
-        dict_s1 = torch.load(weights_path, map_location="cpu")
+        dict_s1 = torch.load(weights_path, map_location="cpu", weights_only=False)
         config = dict_s1["config"]
         self.configs.max_sec = config["data"]["max_sec"]
         t2s_model = Text2SemanticLightningModule(config, "****", is_train=False)

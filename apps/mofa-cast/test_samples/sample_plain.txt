@@ -1,4 +1,4 @@
-host: Hello, how are you today?
+host: Hello, how are you today ?
 guest1: I'm doing great! Thanks for asking.
 host: That's wonderful to hear. What have you been working on?
 guest1: I've been learning about AI and machine learning.
